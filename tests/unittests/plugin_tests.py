@@ -111,7 +111,7 @@ class ForbiddenMockPlugin(Plugin):
 class EnablerPlugin(Plugin):
 
     def is_installed(self, pkg):
-        return self.is_installed
+        return self.is_installed(pkg)
 
 
 class MockOptions(object):
@@ -129,14 +129,14 @@ class MockOptions(object):
 class PluginToolTests(unittest.TestCase):
 
     def test_regex_findall(self):
-        test_s = u"\n".join(
+        test_s = "\n".join(
             ['this is only a test', 'there are only two lines'])
         test_fo = StringIO(test_s)
         matches = regex_findall(r".*lines$", test_fo)
         self.assertEqual(matches, ['there are only two lines'])
 
     def test_regex_findall_miss(self):
-        test_s = u"\n".join(
+        test_s = "\n".join(
             ['this is only a test', 'there are only two lines'])
         test_fo = StringIO(test_s)
         matches = regex_findall(r".*not_there$", test_fo)

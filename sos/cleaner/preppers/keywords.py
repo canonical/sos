@@ -21,7 +21,7 @@ class KeywordPrepper(SoSPrepper):
 
     name = 'keyword'
 
-    def _get_items_for_keyword(self, archive):
+    def _get_items_for_keyword(self):
         items = []
         for kw in self.opts.keywords:
             items.append(kw)

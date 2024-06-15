@@ -142,6 +142,7 @@ any third party.
         self.register_presets(GENERIC_PRESETS)
 
     def check(self, remote=''):
+        # pylint: disable=unused-argument
         """
         This function is responsible for determining if the underlying system
         is supported by this policy.

@@ -285,6 +285,7 @@ def sos_get_command_output(command, timeout=TIMEOUT_DEFAULT, stderr=False,
     else:
         _output = PIPE
     try:
+        # pylint: disable-next=subprocess-popen-preexec-fn
         p = Popen(expanded_args, shell=False, stdout=_output,
                   stderr=STDOUT if stderr else PIPE,
                   bufsize=-1, env=cmd_env, close_fds=True,

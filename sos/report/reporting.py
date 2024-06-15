@@ -27,6 +27,7 @@ class Node(object):
         return json.dumps(self.data)
 
     def can_add(self, node):
+        # pylint: disable=unused-argument
         return False
 
 
@@ -185,7 +186,7 @@ class PlainTextReport(object):
         if (len(self.FOOTER) > 0):
             line_buf.append(self.FOOTER)
 
-        output = u'\n'.join(map(lambda i: (i if isinstance(i, str)
+        output = '\n'.join(map(lambda i: (i if isinstance(i, str)
                                            else i.decode('utf8', 'ignore')),
                                 line_buf))
         return output

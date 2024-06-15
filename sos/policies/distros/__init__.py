@@ -699,9 +699,9 @@ class LinuxPolicy(Policy):
         ret = pexpect.spawn(sftp_cmd, encoding='utf-8')
 
         sftp_expects = [
-            u'sftp>',
-            u'password:',
-            u'Connection refused',
+            'sftp>',
+            'password:',
+            'Connection refused',
             pexpect.TIMEOUT,
             pexpect.EOF
         ]
@@ -713,8 +713,8 @@ class LinuxPolicy(Policy):
         elif idx == 1:
             ret.sendline(password)
             pass_expects = [
-                u'sftp>',
-                u'Permission denied',
+                'sftp>',
+                'Permission denied',
                 pexpect.TIMEOUT,
                 pexpect.EOF
             ]
@@ -743,10 +743,10 @@ class LinuxPolicy(Policy):
         ret.sendline(put_cmd)
 
         put_expects = [
-            u'100%',
+            '100%',
             pexpect.TIMEOUT,
             pexpect.EOF,
-            u'No such file or directory'
+            'No such file or directory'
         ]
 
         put_success = ret.expect(put_expects, timeout=180)
@@ -997,6 +997,7 @@ class LinuxPolicy(Policy):
         return ''
 
     def create_sos_container(self, image=None, auth=None, force_pull=False):
+        # pylint: disable=unused-argument
         """Returns the command that will create the container that will be
         used for running commands inside a container on hosts that require it.
 

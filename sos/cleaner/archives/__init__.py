@@ -70,6 +70,7 @@ class SoSObfuscationArchive():
 
     @classmethod
     def check_is_type(cls, arc_path):
+        # pylint: disable=unused-argument
         """Check if the archive is a well-known type we directly support"""
         return False
 
