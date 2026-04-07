@@ -1,0 +1,44 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  sync:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: Checkout Canonical Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Use a PAT if you want this push to trigger other workflows
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync from Upstream
+        run: |
+          # 1. Add the original sosreport as upstream
+          git remote add upstream https://github.com/sosreport/sos.git
+          git fetch upstream main
+
+          # 2. Merge upstream changes (Assuming 'main' is the main branch)
+          # We use --no-commit to allow us to modify the result
+          git merge upstream/main --no-commit --no-ff || echo "Conflicts detected, proceeding with manual resolution logic"
+
+          # 3. PROTECT WORKFLOWS: Restore your local .github/workflows directory
+          # This overwrites any incoming workflow changes with your existing ones
+          git checkout HEAD -- .github/workflows
+
+          # 4. Finalize and Push
+          if [ -n "$(git status --porcelain)" ]; then
+            git commit -m "chore: sync with upstream sosreport/sos (preserved canonical workflows)"
+            git push origin main
+          else
+            echo "No changes to sync."
+          fi
