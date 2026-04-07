@@ -35,9 +35,10 @@ P_FILE = "file"
 P_LINK = "link"
 P_NODE = "node"
 P_DIR = "dir"
+P_CONTFILE = "contaner file"
 
 
-class Archive(object):
+class Archive:
     """Abstract base class for archives."""
 
     @classmethod
@@ -116,18 +117,18 @@ class Archive(object):
         directory based cache prior to packaging should return the
         path to the temporary directory where the report content is
         located"""
-        pass
+        raise NotImplementedError
 
     def cleanup(self):
         """Clean up any temporary resources used by an Archive class."""
-        pass
+        raise NotImplementedError
 
     def finalize(self, method):
         """Finalize an archive object via method. This may involve creating
         An archive that is subsequently compressed or simply closing an
         archive that supports in-line handling. If method is automatic then
         the following methods are tried in order: xz, gzip"""
-        pass
+        raise NotImplementedError
 
 
 class FileCacheArchive(Archive):
@@ -159,7 +160,7 @@ class FileCacheArchive(Archive):
     def dest_path(self, name):
         if os.path.isabs(name):
             name = name.lstrip(os.sep)
-        return (os.path.join(self._archive_root, name))
+        return os.path.join(self._archive_root, name)
 
     def join_sysroot(self, path):
         if not self.sysroot or path.startswith(self.sysroot):
@@ -210,7 +211,7 @@ class FileCacheArchive(Archive):
         # Build a list of path components in root-to-leaf order.
         path = src_dir
         path_comps = []
-        while path != '/' and path != '':
+        while path not in ('/', ''):
             head, tail = os.path.split(path)
             path_comps.append(tail)
             path = head
@@ -304,7 +305,7 @@ class FileCacheArchive(Archive):
         if os.path.exists(dest_dir) and not os.path.isdir(dest_dir):
             raise ValueError(f"path '{dest_dir}' exists and is not a "
                              "directory")
-        elif not os.path.exists(dest_dir):
+        if not os.path.exists(dest_dir):
             src_dir = src if path_type == P_DIR else os.path.split(src)[0]
             self._make_leading_paths(src_dir)
 
@@ -339,13 +340,13 @@ class FileCacheArchive(Archive):
     def _copy_attributes(self, src, dest):
         # copy file attributes, skip SELinux xattrs for /sys and /proc
         try:
-            stat = os.stat(src)
+            _stat = os.stat(src)
             if src.startswith("/sys/") or src.startswith("/proc/"):
                 shutil.copymode(src, dest)
-                os.utime(dest, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+                os.utime(dest, ns=(_stat.st_atime_ns, _stat.st_mtime_ns))
             else:
                 shutil.copystat(src, dest)
-            os.chown(dest, stat.st_uid, stat.st_gid)
+            os.chown(dest, _stat.st_uid, _stat.st_gid)
         except Exception as e:
             self.log_debug(f"caught '{e}' setting attributes of '{dest}'")
 
@@ -377,7 +378,7 @@ class FileCacheArchive(Archive):
                 # Open file case: first rewind the file to obtain
                 # everything written to it.
                 src.seek(0)
-                with open(dest, "w") as f:
+                with open(dest, "w", encoding='utf-8') as f:
                     for line in src:
                         f.write(line)
                 file_name = "open file"
@@ -515,8 +516,8 @@ class FileCacheArchive(Archive):
         if 'PC_NAME_MAX' in os.pathconf_names:
             pc_name_max = os.pathconf_names['PC_NAME_MAX']
             return os.pathconf(self._archive_root, pc_name_max)
-        else:
-            return 255
+
+        return 255
 
     def get_tmp_dir(self):
         return self._archive_root
@@ -653,22 +654,20 @@ class FileCacheArchive(Archive):
             enc_cmd += "-c --passphrase-fd 0 "
             enc_cmd = f"/bin/bash -c \"echo $sos_gpg | {enc_cmd}\""
             enc_cmd += archive
-        r = sos_get_command_output(enc_cmd, timeout=0, env=env)
+        r = sos_get_command_output(enc_cmd, timeout=0, env=env, stderr=True)
         if r["status"] == 0:
             return arc_name
-        elif r["status"] == 2:
+        if r["status"] == 2:
             if self.enc_opts["key"]:
                 msg = "Specified key not in keyring"
             else:
                 msg = "Could not read passphrase"
         else:
-            # TODO: report the actual error from gpg. Currently, we cannot as
-            # sos_get_command_output() does not capture stderr
-            msg = f"gpg exited with code {r['status']}"
+            msg = f"gpg exited with code {r['status']} and error {r['output']}"
         raise Exception(msg)
 
-    def _build_archive(self, method):
-        pass
+    def _build_archive(self, method):  # pylint: disable=unused-argument
+        return self.name()
 
 
 class TarFileArchive(FileCacheArchive):
@@ -719,7 +718,7 @@ class TarFileArchive(FileCacheArchive):
 
     def get_selinux_context(self, path):
         try:
-            (rc, c) = selinux.getfilecon(path)
+            (_, c) = selinux.getfilecon(path)
             return c
         except Exception:
             return None
@@ -727,39 +726,40 @@ class TarFileArchive(FileCacheArchive):
     def name(self):
         return f"{self._archive_root}.{self._suffix}"
 
-    def name_max(self):
-        # GNU Tar format supports unlimited file name length. Just return
-        # the limit of the underlying FileCacheArchive.
-        return super().name_max()
-
     def _build_archive(self, method):
+        _mode = 'w'
         if method == 'auto':
             method = 'xz' if find_spec('lzma') is not None else 'gzip'
-        _comp_mode = method.strip('ip')
-        self._archive_name = f"{self._archive_name}.{_comp_mode}"
+        if method == 'none':
+            method = None
+        if method is not None:
+            _comp_mode = method.strip('ip')
+            self._archive_name = f"{self._archive_name}.{_comp_mode}"
+            self._suffix += f".{_comp_mode}"
+            _mode = f"w:{_comp_mode}"
         # tarfile does not currently have a consistent way to define comnpress
         # level for both xz and gzip ('preset' for xz, 'compresslevel' for gz)
-        if method == 'gzip':
-            kwargs = {'compresslevel': 6}
-        else:
-            kwargs = {'preset': 3}
-        tar = tarfile.open(self._archive_name, mode=f"w:{_comp_mode}",
-                           **kwargs)
-        # add commonly reviewed files first, so that they can be more easily
-        # read from memory without needing to extract the whole archive
-        for _content in ['version.txt', 'sos_reports', 'sos_logs']:
-            if not os.path.exists(os.path.join(self._archive_root, _content)):
-                continue
-            tar.add(
-                os.path.join(self._archive_root, _content),
-                arcname=f"{self._name}/{_content}"
-            )
-        # we need to pass the absolute path to the archive root but we
-        # want the names used in the archive to be relative.
-        tar.add(self._archive_root, arcname=self._name,
-                filter=self.copy_permissions_filter)
-        tar.close()
-        self._suffix += f".{_comp_mode}"
+        kwargs = {
+            None: {},
+            'gzip': {'compresslevel': 6},
+            'xz':   {'preset': 3}
+        }
+        with tarfile.open(self._archive_name,
+                          mode=_mode,
+                          **kwargs[method]) as tar:
+            # Add commonly reviewed files first, so that they can be more
+            # easily read from memory without needing to extract
+            # the whole archive
+            for _content in ['version.txt', 'sos_reports', 'sos_logs']:
+                if os.path.exists(os.path.join(self._archive_root, _content)):
+                    tar.add(
+                        os.path.join(self._archive_root, _content),
+                        arcname=f"{self._name}/{_content}"
+                    )
+            # we need to pass the absolute path to the archive root but we
+            # want the names used in the archive to be relative.
+            tar.add(self._archive_root, arcname=self._name,
+                    filter=self.copy_permissions_filter)
         return self.name()
 
 

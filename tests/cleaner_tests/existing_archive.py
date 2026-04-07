@@ -23,7 +23,7 @@ class ExistingArchiveCleanTest(StageTwoReportTest):
     :avocado: tags=stagetwo
     """
 
-    sos_cmd = '-v tests/test_data/%s.tar.xz' % ARCHIVE
+    sos_cmd = f'tests/test_data/{ARCHIVE}.tar.xz'
     sos_component = 'clean'
 
     def test_obfuscation_log_created(self):
@@ -34,9 +34,9 @@ class ExistingArchiveCleanTest(StageTwoReportTest):
     def test_archive_type_correct(self):
         with open(os.path.join(
                 self.tmpdir,
-                f'{ARCHIVE}-obfuscation.log'), 'r') as log:
+                f'{ARCHIVE}-obfuscation.log'), 'r', encoding='utf-8') as log:
             for line in log:
-                if "Loaded %s" % ARCHIVE in line:
+                if f"Loaded {ARCHIVE}" in line:
                     assert \
                         'as type sos report archive' in line, \
                         f"Incorrect archive type detected: {line}"
@@ -45,7 +45,7 @@ class ExistingArchiveCleanTest(StageTwoReportTest):
     def test_from_cmdline_logged(self):
         with open(os.path.join(
                 self.tmpdir,
-                f'{ARCHIVE}-obfuscation.log'), 'r') as log:
+                f'{ARCHIVE}-obfuscation.log'), 'r', encoding='utf-8') as log:
             for line in log:
                 if 'From cmdline' in line:
                     assert \
@@ -56,7 +56,7 @@ class ExistingArchiveCleanTest(StageTwoReportTest):
     def test_extraction_completed_successfully(self):
         with open(os.path.join(
                 self.tmpdir,
-                f'{ARCHIVE}-obfuscation.log'), 'r') as log:
+                f'{ARCHIVE}-obfuscation.log'), 'r', encoding='utf-8') as log:
             for line in log:
                 if 'Extracted path is' in line:
                     path = line.split('Extracted path is')[-1].strip()
@@ -92,12 +92,12 @@ class ExistingArchiveCleanTest(StageTwoReportTest):
         map_file = re.findall(
             '/.*sosreport-.*-private_map', self.cmd_output.stdout
         )[-1]
-        with open(map_file, 'r') as mf:
+        with open(map_file, 'r', encoding='utf-8') as mf:
             map_json = json.load(mf)
         for mapping in map_json:
             for key, val in map_json[mapping].items():
-                assert key, "Empty key found in %s" % mapping
-                assert val, "%s mapping for '%s' empty" % (mapping, key)
+                assert key, f"Empty key found in {mapping}"
+                assert val, f"{mapping} mapping for '{key}' empty"
 
     def test_ip_not_in_any_file(self):
         content = self.grep_for_content('10.0.0.15')
@@ -124,13 +124,16 @@ class ExistingArchiveCleanTmpTest(StageTwoReportTest):
     :avocado: tags=stagetwo
     """
 
-    sos_cmd = f'-v --keywords var,tmp,avocado --disable-parsers \
-        ip,ipv6,mac,username --no-update tests/test_data/{ARCHIVE}.tar.xz'
+    sos_cmd = f'--keywords avocado,ExistingArchiveCleanTmpTest --no-update \
+                --disable-parsers ip,ipv6,mac,username \
+                tests/test_data/{ARCHIVE}.tar.xz'
     sos_component = 'clean'
 
     def test_sys_tmp_not_obfuscated(self):
-        """ Ensure that keywords var, tmp and avocado remains in the final
-        archive path despite they are parts of the --tmp-dir
+        """ Ensure that keywords avocado and ExistingArchiveCleanTmpTest
+        remains in the final archive path despite they are parts of the
+        --tmp-dir (set like
+        /var/tmp/avocado_1m9g7qt1sos_tests.py.ExistingArchiveCleanTmpTest )
         """
         self.assertTrue(
             self.archive.startswith(os.getenv('AVOCADO_TESTS_COMMON_TMPDIR'))

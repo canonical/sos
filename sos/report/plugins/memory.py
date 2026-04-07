@@ -26,8 +26,10 @@ class Memory(Plugin, IndependentPlugin):
             "/proc/pagetypeinfo",
             "/proc/vmallocinfo",
             "/sys/kernel/mm/ksm",
-            "/sys/kernel/mm/transparent_hugepage/enabled",
-            "/sys/kernel/mm/hugepages"
+            "/sys/kernel/mm/transparent_hugepage",
+            "/sys/kernel/mm/hugepages",
+            "/sys/kernel/mm/lru_gen/enabled",
+            "/sys/kernel/mm/lru_gen/min_ttl_ms",
         ])
         self.add_cmd_output("free", root_symlink="free")
         self.add_cmd_output([

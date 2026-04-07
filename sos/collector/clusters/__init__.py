@@ -132,7 +132,7 @@ class Cluster():
 
         if cls.sos_plugin_options:
             _opts = cls.sos_plugin_options
-            opts = ', '.join(f"{opt}={_opts[opt]}" for opt in _opts)
+            opts = ', '.join(f"{k}={v}" for k, v in _opts.items())
             section.add_text(
                 f"Sets the following plugin options: {opts}",
                 newline=False
@@ -260,7 +260,6 @@ class Cluster():
         :param node:        The non-primary node
         :type node:         ``SoSNode``
         """
-        pass
 
     def set_transport_type(self):
         """The default connection type used by sos collect is to leverage the
@@ -280,7 +279,6 @@ class Cluster():
         :param node:       The primary node
         :type node:        ``SoSNode``
         """
-        pass
 
     def check_node_is_primary(self, node):
         """In the event there are multiple primaries, or if the collect command
@@ -324,7 +322,6 @@ class Cluster():
         extra commands to be run even if a node list is given by the user, and
         thus get_nodes() would not be called
         """
-        pass
 
     def check_enabled(self):
         """
@@ -352,7 +349,6 @@ class Cluster():
         This helps ensure that sos does make lasting changes to the environment
         in which we are running
         """
-        pass
 
     def get_nodes(self):
         """
@@ -364,7 +360,7 @@ class Cluster():
         :returns: A list of node FQDNs or IP addresses
         :rtype: ``list`` or ``None``
         """
-        pass
+        raise NotImplementedError
 
     def _get_nodes(self):
         try:
@@ -388,7 +384,7 @@ class Cluster():
         node.manifest.add_field('label', label)
         return label
 
-    def set_node_label(self, node):
+    def set_node_label(self, node):  # pylint: disable=unused-argument
         """This may be overridden by clusters profiles subclassing this class
 
         If there is a distinction between primaries and nodes, or types of
@@ -407,7 +403,8 @@ class Cluster():
         try:
             nodes = self.get_nodes()
         except Exception as err:
-            raise Exception(f"Cluster failed to enumerate nodes: {err}")
+            raise Exception(f"Cluster failed to enumerate nodes: {err}") \
+                from err
         if isinstance(nodes, list):
             node_list = [n.strip() for n in nodes if n]
         elif isinstance(nodes, str):

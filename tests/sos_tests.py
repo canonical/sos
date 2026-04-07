@@ -32,10 +32,14 @@ SOS_TEST_DATA_DIR = os.path.realpath(os.path.join(SOS_TEST_DIR, 'test_data'))
 SOS_TEST_BIN = os.path.realpath(os.path.join(SOS_TEST_DIR, '../bin/sos'))
 
 RH_DIST = ['rhel', 'centos', 'fedora', 'centos-stream']
-UBUNTU_DIST = ['Ubuntu', 'debian']
+UBUNTU_DIST = ['Ubuntu']
+DEBIAN_DIST = ['Ubuntu', 'debian']
+
+_distro = distro.detect()
 
 
 def skipIf(cond, message=None):
+    # pylint: disable=unused-argument
     def decorator(function):
         def wrapper(self, *args, **kwargs):
             if callable(cond):
@@ -48,16 +52,26 @@ def skipIf(cond, message=None):
 
 
 def redhat_only(tst):
-    def wrapper(func):
-        if distro.detect().name not in RH_DIST:
+    def wrapper(*args, **kwargs):
+        if _distro.name not in RH_DIST:
             raise TestSkipError('Not running on a Red Hat distro')
+        tst(*args, *kwargs)
     return wrapper
 
 
 def ubuntu_only(tst):
-    def wrapper(func):
-        if distro.detect().name not in UBUNTU_DIST:
-            raise TestSkipError('Not running on a Ubuntu or Debian distro')
+    def wrapper(*args, **kwargs):
+        if _distro.name not in UBUNTU_DIST:
+            raise TestSkipError('Not running on a Ubuntu distro')
+        tst(*args, **kwargs)
+    return wrapper
+
+
+def debian_only(tst):
+    def wrapper(*args, **kwargs):
+        if _distro.name not in DEBIAN_DIST:
+            raise TestSkipError('Not running on a Debian or Ubuntu distro')
+        tst(*args, *kwargs)
     return wrapper
 
 
@@ -77,8 +91,10 @@ class BaseSoSTest(Test):
     sos_timeout = 600
     redhat_only = False
     ubuntu_only = False
+    debian_only = False
     end_of_test_case = False
     arch = []
+    only_os_versions = []
 
     @property
     def klass_name(self):
@@ -120,7 +136,10 @@ class BaseSoSTest(Test):
 
         # get networking info
         hostname = socket.gethostname()
-        ip_addr = socket.gethostbyname(hostname)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # This doesn't send any data
+        s.connect(('10.255.255.255', 1))
+        ip_addr = s.getsockname()[0]
         sysinfo['networking'] = {}
         sysinfo['networking']['hostname'] = hostname
         sysinfo['networking']['ip_addr'] = ip_addr
@@ -156,12 +175,12 @@ class BaseSoSTest(Test):
                 # entire test suite, which will become very difficult to read
 
                 # don't flood w/ super verbose logs
-                LOG_UI.error('ERROR:\n' + msg[:8196])
+                LOG_UI.error(f'ERROR:\n{msg[:8196]}')
                 if err.result.interrupted:
-                    raise Exception("Timeout exceeded, see output above")
-                else:
-                    raise Exception("Command failed, see output above: "
-                                    f"'{err.command.split('bin/')[1]}'")
+                    raise Exception("Timeout exceeded, see output "
+                                    "above") from err
+                raise Exception("Command failed, see output above: "
+                                f"'{err.command.split('bin/')[1]}'") from err
         with open(os.path.join(self.tmpdir, 'output'), 'wb') as pfile:
             pickle.dump(self.cmd_output, pfile)
         self.cmd_output.stdout = self.cmd_output.stdout.decode()
@@ -177,13 +196,13 @@ class BaseSoSTest(Test):
         fname = os.path.join(self.tmpdir, fname)
         if isinstance(content, bytes):
             content = content.decode()
-        with open(fname, 'w') as wfile:
+        with open(fname, 'w', encoding='utf-8') as wfile:
             wfile.write(content)
 
     def read_file_from_tmpdir(self, fname):
         fname = os.path.join(self.tmpdir, fname)
         try:
-            with open(fname, 'r') as tfile:
+            with open(fname, 'r', encoding='utf-8') as tfile:
                 return tfile.read()
         except Exception:
             pass
@@ -241,7 +260,10 @@ class BaseSoSTest(Test):
                 raise TestSkipError('Not running on a Red Hat distro')
         elif self.ubuntu_only:
             if self.local_distro not in UBUNTU_DIST:
-                raise TestSkipError("Not running on a Ubuntu or Debian distro")
+                raise TestSkipError("Not running on a Ubuntu distro")
+        elif self.debian_only:
+            if self.local_distro not in DEBIAN_DIST:
+                raise TestSkipError("Not running on a Debian or Ubuntu distro")
 
     def check_arch_for_enablement(self):
         """
@@ -258,14 +280,29 @@ class BaseSoSTest(Test):
         raise TestSkipError(f"Unsupported architecture {sys_arch} for test "
                             f"(supports: {self.arch})")
 
+    def check_os_version_for_enablement(self):
+        """
+        Check if the test case is meant only for a specific version or versions
+
+        Takes the `versions` class attribute, a list that specifies
+        the versions where the test applies. If the list is empty, assume all
+        versions of the OS are acceptable. Otherwise, raise a TestSkipError.
+        """
+        os_version = _distro.version
+        if not self.only_os_versions or os_version in self.only_os_versions:
+            return True
+        raise TestSkipError(f"Unsupported OS version {os_version} "
+                            f"(supports: {self.only_os_versions})")
+
     def setUp(self):
         """Setup the tmpdir and any needed mocking for the test, then execute
         the defined sos command. Ensure that we only run the sos command once
         for every test case, instead of once for every test_* method defined.
         """
-        self.local_distro = distro.detect().name
+        self.local_distro = _distro.name
         self.check_distro_for_enablement()
         self.check_arch_for_enablement()
+        self.check_os_version_for_enablement()
         # check to prevent multiple setUp() runs
         if not os.path.isdir(self.tmpdir):
             # setup our class-shared tmpdir
@@ -317,20 +354,17 @@ class BaseSoSTest(Test):
         """Called at the end of a test run to ensure that any needed per-test
         cleanup can be done.
         """
-        pass
 
     def setup_mocking(self):
         """Since we need to use setUp() in our overrides of avocado.Test,
         provide an alternate method for test cases that subclass BaseSoSTest
         to use.
         """
-        pass
 
     def pre_sos_setup(self):
         """Do any needed non-mocking setup prior to the sos execution that is
         called in setUp()
         """
-        pass
 
     def assertFileExists(self, fname):
         """Asserts that fname exists on the filesystem"""
@@ -387,17 +421,17 @@ class BaseSoSReportTest(BaseSoSTest):
                 self._manifest = json.loads(content)
             except Exception:
                 self._manifest = ''
-                self.warning('Could not load manifest for test')
+                self.log.warn('Could not load manifest for test')
         return self._manifest
 
     @property
     def encrypted_path(self):
         return self.get_encrypted_path()
 
-    def _decrypt_archive(self, archive):
-        _archive = archive.strip('.gpg')
+    def _decrypt_archive(self, archive_arg):
+        _archive = archive_arg.strip('.gpg')
         cmd = (f"gpg --batch --passphrase {self.encrypt_pass} -o {_archive} "
-               f"--decrypt {archive}")
+               f"--decrypt {archive_arg}")
         try:
             process.run(cmd, timeout=10)
         except Exception as err:
@@ -430,11 +464,10 @@ class BaseSoSReportTest(BaseSoSTest):
             # grep will return an exit code of 1 if no matches are found,
             # which is what we want
             return False
-        else:
-            flist = []
-            for ln in out.stdout.decode('utf-8').splitlines():
-                flist.append(ln.split(self.tmpdir)[-1])
-            return flist
+        flist = []
+        for ln in out.stdout.decode('utf-8').splitlines():
+            flist.append(ln.split(self.tmpdir)[-1])
+        return flist
 
     def get_encrypted_path(self):
         """Since avocado re-instantiates a new object for every test_ method,
@@ -510,7 +543,8 @@ class BaseSoSReportTest(BaseSoSTest):
         :rtype: ``str``
         """
         content = ''
-        with open(self.get_name_in_archive(fname), 'r') as gfile:
+        with open(self.get_name_in_archive(fname), 'r',
+                  encoding='utf-8') as gfile:
             content = gfile.read()
         return content
 
@@ -580,7 +614,7 @@ class BaseSoSReportTest(BaseSoSTest):
         matched = False
         fname = self.get_name_in_archive(fname)
         self.assertFileExists(fname)
-        with open(fname, 'r') as lfile:
+        with open(fname, 'r', encoding='utf-8') as lfile:
             _contents = lfile.read()
             for line in _contents.splitlines():
                 if re.match(f".*{content}.*", line, re.I):
@@ -601,7 +635,7 @@ class BaseSoSReportTest(BaseSoSTest):
         """
         matched = False
         fname = self.get_name_in_archive(fname)
-        with open(fname, 'r') as mfile:
+        with open(fname, 'r', encoding='utf-8') as mfile:
             for line in mfile.read().splitlines():
                 if re.match(f".*{content}.*", line, re.I):
                     matched = True
@@ -822,9 +856,9 @@ class StageTwoReportTest(BaseSoSReportTest):
         self.end_of_test_case = False
         self.sm = software_manager.manager.SoftwareManager()
 
-        for dist in self.packages:
-            if isinstance(self.packages[dist], str):
-                self.packages[dist] = [self.packages[dist]]
+        for dist, value in self.packages.items():
+            if isinstance(value, str):
+                self.packages[dist] = [value]
 
         keys = self.packages.keys()
         # allow for single declaration of packages for the RH family

@@ -22,12 +22,7 @@ To clone the current main (development) branch run:
 Reporting bugs
 ^^^^^^^^^^^^^^
 
-Please report bugs via the mailing list or by opening an issue in the GitHub Issue Tracker
-
-Mailing list
-^^^^^^^^^^^^^
-
-`sos-devel <https://www.redhat.com/mailman/listinfo/sos-devel>`_ is the mailing list for any sos-related questions and discussion. Patch submissions and reviews are welcome too.
+Please report bugs by opening an issue in the GitHub Issue Tracker.
 
 Patches and pull requests
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -63,9 +58,9 @@ Manual Installation
 Pre-built Packaging
 ^^^^^^^^^^^^^^^^^^^
 
-Fedora/RHEL users install via yum:
+Fedora/RHEL users install via dnf:
 
-``yum install sos``
+``dnf install sos``
 
 Debian users install via apt:
 
@@ -91,3 +86,5 @@ Core Reference
    plugins
    reporting
    utilities
+   upload
+   targets

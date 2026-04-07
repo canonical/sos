@@ -14,7 +14,7 @@
 This module houses the i18n setup and message function. The default is to use
 gettext to internationalize messages.
 """
-__version__ = "4.7.2"
+__version__ = "4.11.0"
 
 import os
 import sys
@@ -33,12 +33,6 @@ def _default(msg):
 
 
 _sos = _default
-
-# py3 < 3.6 compat
-try:
-    ModuleNotFoundError
-except NameError:
-    ModuleNotFoundError = ImportError
 
 
 class SoS():
@@ -60,10 +54,12 @@ class SoS():
         import sos.report
         import sos.cleaner
         import sos.help
+        import sos.upload
         self._components = {
             'report': (sos.report.SoSReport, ['rep']),
             'clean': (sos.cleaner.SoSCleaner, ['cleaner', 'mask']),
-            'help': (sos.help.SoSHelper, [])
+            'help': (sos.help.SoSHelper, []),
+            'upload': (sos.upload.SoSUpload, [])
         }
         # some distros do not want pexpect as a default dep, so try to load
         # collector here, and if it fails add an entry that implies it is at
@@ -74,10 +70,10 @@ class SoS():
                                            ['collector'])
         except ModuleNotFoundError as err:
             import sos.missing
-            if 'sos.collector' in err.msg:
+            if 'sos.collector' in str(err.msg):
                 # is not locally installed - packaged separately
                 self._components['collect'] = (sos.missing.MissingCollect, [])
-            elif 'pexpect' in err.msg:
+            elif 'pexpect' in str(err.msg):
                 # cannot be imported due to missing the pexpect dep
                 self._components['collect'] = (sos.missing.MissingPexpect, [])
             else:
@@ -85,16 +81,16 @@ class SoS():
                 raise
         # build the top-level parser
         _com_string = ''
-        for com in self._components:
-            aliases = self._components[com][1]
+        for com, value in self._components.items():
+            aliases = value[1]
             aliases.insert(0, com)
             _com = ', '.join(aliases)
-            desc = self._components[com][0].desc
+            desc = value[0].desc
             _com_string += (f"\t{_com:<30}{desc}\n")
         usage_string = ("%(prog)s <component> [options]\n\n"
                         "Available components:\n")
         usage_string = usage_string + _com_string
-        epilog = ("See `sos <component> --help` for more information")
+        epilog = "See `sos <component> --help` for more information"
         self.parser = ArgumentParser(usage=usage_string, epilog=epilog)
         self.parser.register('action', 'extend', SosListOption)
         # set the component subparsers
@@ -107,16 +103,16 @@ class SoS():
         # now build the parser for each component.
         # this needs to be done here, as otherwise --help will be unavailable
         # for the component subparsers
-        for comp in self._components:
+        for comp, value in self._components.items():
             _com_subparser = self.subparsers.add_parser(
                 comp,
-                aliases=self._components[comp][1],
+                aliases=value[1],
                 prog=f"sos {comp}"
             )
             _com_subparser.usage = f"sos {comp} [options]"
             _com_subparser.register('action', 'extend', SosListOption)
             self._add_common_options(_com_subparser)
-            self._components[comp][0].add_parser_options(parser=_com_subparser)
+            value[0].add_parser_options(parser=_com_subparser)
             _com_subparser.set_defaults(component=comp)
         self.args = self.parser.parse_args(self.cmdline)
         self._init_component()
@@ -152,7 +148,8 @@ class SoS():
 
         global_grp.add_argument('-z', '--compression-type',
                                 dest="compression_type",
-                                choices=['auto', 'gzip', 'xz'],
+                                choices=['auto', 'gzip', 'xz',
+                                         'none'],
                                 help="compression technology to use")
 
         # Group to make tarball encryption (via GPG/password) exclusive
@@ -173,7 +170,7 @@ class SoS():
         initialize that component.
         """
         _com = self.args.component
-        if _com not in self._components.keys():
+        if _com not in self._components:
             print(f"Unknown subcommand '{_com}' specified")
         try:
             _to_load = self._components[_com][0]

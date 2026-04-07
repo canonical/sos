@@ -45,6 +45,14 @@ class SaltStackMaster(RemoteTransport):
             ret['output'] = self._convert_output_json(ret['output'])
         return ret
 
+    def _salt_copy_file(self, node, fname, dest):
+        """
+        Execute cp.get_file on the remote host using SaltStack Master
+        """
+        cmd = f"salt-cp {node} {fname} {dest}"
+        res = sos_get_command_output(cmd, timeout=15)
+        return res['status'] == 0
+
     def _salt_retrieve_file(self, node, fname, dest):
         """
         Execute cp.push on the remote host using SaltStack Master
@@ -64,6 +72,7 @@ class SaltStackMaster(RemoteTransport):
         up = self.run_command("echo Connected", timeout=10)
         return up['status'] == 0
 
+    # pylint: disable=unused-argument
     def _check_for_saltstack(self, password=None):
         """Checks to see if the local system supported SaltStack Master.
 
@@ -82,8 +91,7 @@ class SaltStackMaster(RemoteTransport):
         res = sos_get_command_output(cmd)
         if res['status'] == 0:
             return res['status'] == 0
-        else:
-            raise SaltStackMasterUnsupportedException
+        raise SaltStackMasterUnsupportedException
 
     def _connect(self, password=None):
         """Connect to the remote host using SaltStack Master.
@@ -117,14 +125,30 @@ class SaltStackMaster(RemoteTransport):
     def remote_exec(self):
         """The remote execution command to use for this transport."""
         salt_args = "--out json --static --no-color"
-        return f"salt {salt_args} {self.address} cmd.shell "
+        return f"salt {salt_args} {self.address} cmd.exec_code sh "
+
+    def _copy_file_to_remote(self, fname, dest):
+        """Copy a file to the remote host using SaltStack Master
+
+        Parameters
+            fname   The path to the file on the master
+            dest    The path to the destination directory on the remote host
+
+        Returns
+            True if the file was copied, else False
+        """
+        return (
+            self._salt_copy_file(self.address, fname, dest)
+            if self.connected
+            else False
+        )
 
     def _retrieve_file(self, fname, dest):
         """Retrieve a file from the remote host using saltstack
 
         Parameters
-            fname       The path to the file on the remote host
-            dest        The path to the destination directory on the master
+            fname   The path to the file on the remote host
+            dest    The path to the destination directory on the master
 
         Returns
             True if the file was retrieved, else False

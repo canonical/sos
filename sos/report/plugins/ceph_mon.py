@@ -97,15 +97,15 @@ class CephMON(Plugin, RedHatPlugin, UbuntuPlugin):
                 "/var/snap/microceph/current/conf/*",
             ])
 
-        self.add_cmd_output("ceph report", tags="ceph_report")
+        self.add_cmd_output("ceph report", tags="ceph_report", stderr=False)
         self.add_cmd_output([
             # The ceph_mon plugin will collect all the "ceph ..." commands
             # which typically require the keyring.
 
-            "ceph config dump",
             "ceph config generate-minimal-conf",
             "ceph config log",
             "ceph config-key dump",
+            "ceph crash ls",
             "ceph crash stat",
             "ceph features",
             "ceph health detail",
@@ -118,11 +118,20 @@ class CephMON(Plugin, RedHatPlugin, UbuntuPlugin):
             "ceph mgr services",
             "ceph mgr versions",
             "ceph mon stat",
+            "ceph mon features ls",
+            "ceph node ls",
+            "ceph osd crush class ls",
             "ceph osd crush dump",
+            "ceph osd crush rule ls",
+            "ceph osd crush rule dump",
             "ceph osd crush show-tunables",
             "ceph osd crush tree --show-shadow",
             "ceph osd erasure-code-profile ls",
             "ceph osd metadata",
+            "ceph osd utilization",
+            "ceph telemetry channel ls",
+            "ceph telemetry collection ls",
+            "ceph telemetry ls",
             "ceph quorum_status",
             "ceph versions",
             "ceph-disk list",
@@ -136,23 +145,28 @@ class CephMON(Plugin, RedHatPlugin, UbuntuPlugin):
                     self.add_cmd_output(f"ceph crash info {cid}")
 
         ceph_cmds = [
+            "config dump",
             "device ls",
             "df detail",
             "df",
             "fs dump",
             "fs ls",
+            "fs status",
             "mds stat",
             "mon dump",
             "osd blocked-by",
+            "osd blocklist ls",
             "osd df tree",
             "osd df",
             "osd dump",
             "osd numa-status",
             "osd perf",
             "osd pool autoscale-status",
+            "osd pool availability-status",
             "osd pool ls detail",
             "osd stat",
             "pg dump",
+            "pg dump_stuck",
             "pg stat",
             "status",
             "time-sync-status",
@@ -164,10 +178,11 @@ class CephMON(Plugin, RedHatPlugin, UbuntuPlugin):
         self.add_cmd_output("ceph osd tree --format json-pretty",
                             subdir="json_output",
                             tags="ceph_osd_tree")
-        self.add_cmd_output(
-            [f"ceph tell mon.{mid} mon_status" for mid in self.get_ceph_ids()],
-            subdir="json_output",
-        )
+        for mid in self.get_ceph_ids():
+            self.add_cmd_output([
+                f"ceph tell mon.{mid} mon_status",
+                f"ceph tell mon.{mid} sessions",
+            ], subdir="json_output")
 
         self.add_cmd_output([f"ceph {cmd}" for cmd in ceph_cmds])
 
@@ -175,6 +190,7 @@ class CephMON(Plugin, RedHatPlugin, UbuntuPlugin):
         self.add_cmd_output(
             [f"ceph {cmd} --format json-pretty" for cmd in ceph_cmds],
             subdir="json_output",
+            stderr=False
         )
 
     def get_ceph_version(self):

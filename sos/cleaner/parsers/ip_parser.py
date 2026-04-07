@@ -8,6 +8,7 @@
 #
 # See the LICENSE file in the source distribution for further information.
 
+import re
 from sos.cleaner.parsers import SoSCleanerParser
 from sos.cleaner.mappings.ip_map import SoSIPMap
 
@@ -16,10 +17,10 @@ class SoSIPParser(SoSCleanerParser):
     """Handles parsing for IP addresses"""
 
     name = 'IP Parser'
-    regex_patterns = [
+    regex_pattern = re.compile(
         # IPv4 with or without CIDR
         r'((?<!(-|\.|\d))([0-9]{1,3}\.){3}([0-9]){1,3}(\/([0-9]{1,2}))?)'
-    ]
+    )
     skip_line_patterns = [
         # don't match package versions recorded in journals
         r'.*dnf\[.*\]:'
@@ -36,6 +37,7 @@ class SoSIPParser(SoSCleanerParser):
         'sos_commands/yum/.*list.*',
         'sos_commands/snappy/snap_list_--all',
         'sos_commands/vulkan/vulkaninfo',
+        'etc/rhsm/facts/satellite.facts',
         'var/log/.*dnf.*',
         'var/log/.*packag.*',  # get 'packages' and 'packaging' logs
         '.*(version|release)(\\.txt)?$',  # obvious version files
@@ -44,6 +46,6 @@ class SoSIPParser(SoSCleanerParser):
     map_file_key = 'ip_map'
     compile_regexes = False
 
-    def __init__(self, config, skip_cleaning_files=[]):
-        self.mapping = SoSIPMap()
+    def __init__(self, config, workdir, skip_cleaning_files=[]):
+        self.mapping = SoSIPMap(workdir)
         super().__init__(config, skip_cleaning_files)

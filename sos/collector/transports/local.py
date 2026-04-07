@@ -41,9 +41,12 @@ class LocalTransport(RemoteTransport):
     def _format_cmd_for_exec(self, cmd):
         return cmd
 
+    def _copy_file_to_remote(self, fname, dest):
+        return True
+
     def _read_file(self, fname):
         if os.path.exists(fname):
-            with open(fname, 'r') as rfile:
+            with open(fname, 'r', encoding='utf-8') as rfile:
                 return rfile.read()
         self.log_debug(f"No such file: {fname}")
         return ''

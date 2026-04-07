@@ -79,6 +79,7 @@ class Systemd(Plugin, IndependentPlugin):
 
         self.add_copy_spec([
             "/etc/systemd",
+            "/lib/systemd/*.conf",
             "/lib/systemd/system",
             "/lib/systemd/user",
             "/etc/vconsole.conf",
@@ -94,5 +95,20 @@ class Systemd(Plugin, IndependentPlugin):
             "/usr/lib/tmpfiles.d/*.conf",
         ])
         self.add_forbidden_path('/dev/null')
+
+    def postproc(self):
+        # hide proxy credentials like:
+        # Environment = HTTPS_PROXY=http://user:PASS@proxy.example.com:port
+        self.do_paths_http_sub([
+            "/etc/systemd/system",
+            "/lib/systemd/system",
+            "/run/systemd/system",
+        ])
+        # hide proxy credentials also from cmd outputs
+        for cmd in ["show", "analyze dump"]:
+            self.do_cmd_output_sub(
+                cmd,
+                r"(http(s)?://)\S+:\S+(@.*)",
+                r"\1******:******\3")
 
 # vim: set et ts=4 sw=4 :

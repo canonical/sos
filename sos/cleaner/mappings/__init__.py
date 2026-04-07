@@ -9,8 +9,9 @@
 # See the LICENSE file in the source distribution for further information.
 
 import re
-
-from threading import Lock
+import os
+import tempfile
+from pathlib import Path
 
 
 class SoSMap():
@@ -28,11 +29,38 @@ class SoSMap():
     ignore_short_items = False
     match_full_words_only = False
 
-    def __init__(self):
+    def __init__(self, workdir):
+        self.initializing = True
         self.dataset = {}
         self._regexes_made = set()
         self.compiled_regexes = []
-        self.lock = Lock()
+        self.compiled_search = re.compile('(?!)')  # no match
+        self.cname = self.__class__.__name__.lower()
+        # workdir's default value '/tmp' is used just by avocado tests,
+        # otherwise we override it to /etc/sos/cleaner (or map_file dir)
+        self.workdir = workdir
+        self.cache_dir = os.path.join(self.workdir, 'cleaner_cache',
+                                      self.cname)
+        self.cache_counter = 0  # number of expected items in cache_dir
+        self.load_entries()
+        self.initializing = False
+        self.generate_compiled_regexes()
+
+    def load_entries(self):
+        """ Load cached entries from the disk. This method must be called when
+        we initialize a Map instance and whenever we want to retrieve
+        self.dataset (e.g. to store default_mapping file). The later is
+        essential since a concurrent Map can add more objects to the cache,
+        so we need to update self.dataset up to date.
+
+        Keep in mind that size of self.dataset is usually bigger than number
+        of files in the corresponding cleaner's directory: directory contains
+        just whole items (e.g. IP addresses) while dataset contains more
+        derived objects (e.g. subnets).
+        """
+
+        Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
+        self.load_new_entries_from_dir()
 
     def ignore_item(self, item):
         """Some items need to be completely ignored, for example link-local or
@@ -46,6 +74,41 @@ class SoSMap():
                 return True
         return False
 
+    def insert_to_dataset(self, item, value):
+        self.dataset[item] = value
+
+    def add_sanitised_item_to_dataset(self, item):
+        try:
+            self.insert_to_dataset(item, self.sanitize_item(item))
+        except Exception:
+            # we failed to obfuscate the item as it is not a real IP address
+            # or hostname or similar. Let return the original string and keep
+            # the item->item "mapping" in dataset to save time the next time.
+            self.insert_to_dataset(item, item)
+        if self.compile_regexes:
+            self.add_regex_item(item)
+
+    def load_new_entries_from_dir(self):
+        # Load all new items from the cache_dir. "New" = any numbered file not
+        # lower than self.cache_counter.
+        # The ">=" is essential for calls from self.add(item) / FileExistsError
+        # Update self.cache_counter at the end.
+        with os.scandir(self.cache_dir) as it:
+            num_files = [
+                f.name
+                for f in it
+                if f.name.isdigit() and int(f.name) >= self.cache_counter
+            ]
+        num_files.sort(key=int)
+        for file_name in num_files:
+            fname = os.path.join(self.cache_dir, file_name)
+            with open(fname, 'r', encoding='utf-8') as f:
+                item = f.read()
+            if not self.dataset.get(item, False):
+                self.add_sanitised_item_to_dataset(item)
+        if num_files:
+            self.cache_counter = int(num_files[-1])  # last/biggest number
+
     def add(self, item):
         """Add a particular item to the map, generating an obfuscated pair
         for it.
@@ -56,11 +119,24 @@ class SoSMap():
         """
         if self.ignore_item(item):
             return item
-        with self.lock:
-            self.dataset[item] = self.sanitize_item(item)
-            if self.compile_regexes:
-                self.add_regex_item(item)
-            return self.dataset[item]
+
+        tmpfile = None
+        while not self.dataset.get(item, False):
+            if not tmpfile:
+                # pylint: disable=consider-using-with
+                tmpfile = tempfile.NamedTemporaryFile(dir=self.cache_dir)
+                with open(tmpfile.name, 'w', encoding='utf-8') as f:
+                    f.write(item)
+            try:
+                self.cache_counter += 1
+                os.link(tmpfile.name,
+                        os.path.join(self.cache_dir,
+                                     f"{self.cache_counter}"))
+                self.add_sanitised_item_to_dataset(item)
+            except FileExistsError:
+                self.load_new_entries_from_dir()
+
+        return self.dataset[item]
 
     def add_regex_item(self, item):
         """Add an item to the regexes dict and then re-sort the list that the
@@ -72,11 +148,18 @@ class SoSMap():
         if self.ignore_item(item):
             return
         if item not in self._regexes_made:
+            # we do re.I everywhere, so unify the item
+            item = item.lower()
             # save the item in a set to avoid clobbering existing regexes,
             # as searching this set is significantly faster than searching
             # through the actual compiled_regexes list, especially for very
             # large collections of entries
             self._regexes_made.add(item)
+            # don't iteratively build compiled_regexes and compiled_search
+            # during initialisation, that is redundant;
+            # generate_compiled_regexes is called at the end of init
+            if self.initializing:
+                return
             # add the item, Pattern tuple directly to the compiled_regexes list
             # and then sort the existing list, rather than rebuild the list
             # from scratch every time we add something like we would do if we
@@ -84,6 +167,28 @@ class SoSMap():
             # the set above
             self.compiled_regexes.append((item, self.get_regex_result(item)))
             self.compiled_regexes.sort(key=lambda x: len(x[0]), reverse=True)
+            self.generate_compiled_regexes(only_search=True)
+
+    def generate_compiled_regexes(self, only_search=False):
+        keys = sorted(self._regexes_made, key=len, reverse=True)
+        if not only_search:
+            self.compiled_regexes = [
+                (item, self.get_regex_result(item)) for item in keys
+            ]
+        pattern = "|".join([f'{self.get_regex_escape(k)}' for k in keys])
+        self.compiled_search = re.compile(
+            self.get_regex_fullword(pattern),
+            flags=re.I
+        )
+
+    def get_regex_escape(self, item):
+        return rf'{re.escape(item)}'
+
+    def get_regex_fullword(self, item):
+        item = rf'(?:{item})'
+        if self.match_full_words_only:
+            return rf'(?<![a-z0-9]){item}(?=\b|_|-)'
+        return item
 
     def get_regex_result(self, item):
         """Generate the object/value that is used by the parser when iterating
@@ -99,7 +204,7 @@ class SoSMap():
         :rtype:         ``re.Pattern``
         """
         if self.match_full_words_only:
-            item = rf'(?=\b|_|-){re.escape(item)}(?=\b|_|-)'
+            item = rf'(?<![a-z0-9]){re.escape(item)}(?=\b|_|-)'
         else:
             item = re.escape(item)
         return re.compile(item, re.I)
@@ -125,13 +230,13 @@ class SoSMap():
             return self.add(item)
         return self.dataset[item]
 
-    def conf_update(self, map_dict):
+    def conf_update(self, config):
         """Update the map using information from a previous run to ensure that
         we have consistent obfuscation between reports
 
         Positional arguments:
 
-            :param map_dict:    A dict of mappings with the form of
-                                {clean_entry: 'obfuscated_entry'}
+            :param config:    A dict of mappings with the form of
+                              {clean_entry: 'obfuscated_entry'}
         """
-        self.dataset.update(map_dict)
+        self.dataset.update(config)

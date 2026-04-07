@@ -1,4 +1,5 @@
 # Copyright (c) 2024 Lucas Benedito <lbenedit@redhat.com>
+# Copyright (c) 2025 Nagoor Shaik <nshaik@redhat.com>
 
 # This file is part of the sos project: https://github.com/sosreport/sos
 #
@@ -35,17 +36,39 @@ class AAPGatewayPlugin(Plugin, RedHatPlugin):
             "/etc/ansible-automation-platform/gateway/*.cert",
         ])
 
-        self.add_cmd_output("aap-gateway-manage list_services")
+        self.add_cmd_output([
+            "automation-gateway-service status",
+            "aap-gateway-manage print_settings",
+            "aap-gateway-manage authenticators",
+            "aap-gateway-manage showmigrations",
+            "aap-gateway-manage list_services",
+            "aap-gateway-manage feature_flags --list",
+            "aap-gateway-manage --version",
+        ])
         self.add_dir_listing("/etc/ansible-automation-platform/",
                              recursive=True)
 
     def postproc(self):
         # remove database password
-        jreg = r"(DATABASE_PASSWORD)(\s*)(=|:)(\s*)(.*)"
-        repl = r"\1\2\3\4********"
+        jreg = r"(\s*'PASSWORD'\s*:\s*)('.*')"
+        repl = r"\1********"
         self.do_path_regex_sub(
             "/etc/ansible-automation-platform/gateway/settings.py",
             jreg,
             repl)
+
+        # Mask PASSWORD from print_settings command
+        jreg = r'((["\']?PASSWORD["\']?\s*[:=]\s*)[rb]?["\'])(.*?)(["\'])'
+        self.do_cmd_output_sub(
+            "aap-gateway-manage print_settings",
+            jreg,
+            r'\1**********\4')
+
+        # Mask SECRET_KEY from print_settings command
+        jreg = r'((SECRET_KEY\s*=\s*)([rb]?["\']))(.*?)(["\'])'
+        self.do_cmd_output_sub(
+            "aap-gateway-manage print_settings",
+            jreg,
+            r'\1**********\5')
 
 # vim: set et ts=4 sw=4 :

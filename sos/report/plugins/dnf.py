@@ -78,8 +78,10 @@ class DNFPlugin(Plugin, RedHatPlugin):
         self.add_cmd_output([
             "dnf --version",
             "dnf list extras",
+            "dnf updateinfo info security",
+            "dnf updateinfo list --available",
             "package-cleanup --dupes",
-            "package-cleanup --problems"
+            "package-cleanup --problems",
         ])
 
         self.add_cmd_output("dnf list installed",
@@ -149,5 +151,11 @@ class DNFPlugin(Plugin, RedHatPlugin):
         #   proxy_password = ********
         #
         self.do_file_sub("/etc/dnf/dnf.conf", regexp, repl)
+
+        # Scrub credentials in http URIs
+        self.do_paths_http_sub([
+            '/etc/yum.repos.d/*',
+            '/var/log/dnf.*',
+        ])
 
 # vim: set et ts=4 sw=4 :

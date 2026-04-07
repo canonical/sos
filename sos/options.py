@@ -7,8 +7,7 @@
 # See the LICENSE file in the source distribution for further information.
 
 from argparse import Action
-from configparser import (ConfigParser, ParsingError, Error,
-                          DuplicateOptionError)
+from configparser import ConfigParser
 
 
 def _is_seq(val):
@@ -22,15 +21,14 @@ def str_to_bool(val):
     _val = val.lower()
     if _val in ['true', 'on', 'yes']:
         return True
-    elif _val in ['false', 'off', 'no']:
+    if _val in ['false', 'off', 'no']:
         return False
-    else:
-        return None
+    return None
 
 
 class SoSOptions():
 
-    def _merge_opt(self, opt, src, is_default):
+    def _merge_opt(self, opt, src, is_default, prefer_new):
         def _unset(val):
             return (val == "" or val is None)
 
@@ -41,9 +39,11 @@ class SoSOptions():
             # - we replace unset option by a real value
             # - new default is set, or
             # - non-sequential variable keeps its default value
+            # pylint: disable=too-many-boolean-expressions
             if (_unset(oldvalue) and not _unset(newvalue)) or \
                is_default or \
-               ((opt not in self._nondefault) and (not _is_seq(newvalue))):
+               ((opt not in self._nondefault) and (not _is_seq(newvalue))) or \
+               prefer_new:
                 # Overwrite atomic values
                 setattr(self, opt, newvalue)
                 if is_default:
@@ -54,11 +54,11 @@ class SoSOptions():
                 # Concatenate sequence types
                 setattr(self, opt, newvalue + oldvalue)
 
-    def _merge_opts(self, src, is_default):
+    def _merge_opts(self, src, is_default, prefer_new):
         if not isinstance(src, dict):
             src = vars(src)
         for arg in self.arg_names:
-            self._merge_opt(arg, src, is_default)
+            self._merge_opt(arg, src, is_default, prefer_new)
 
     def __str(self, quote=False, sep=" ", prefix="", suffix=""):
         """Format a SoSOptions object as a human or machine readable string.
@@ -112,9 +112,9 @@ class SoSOptions():
         for arg in self.arg_defaults:
             setattr(self, arg, self.arg_defaults[arg])
         # next, load any kwargs
-        for arg in kwargs.keys():
+        for arg, kwarg in kwargs.items():
             self.arg_names.append(arg)
-            setattr(self, arg, kwargs[arg])
+            setattr(self, arg, kwarg)
 
     @classmethod
     def from_args(cls, args, arg_defaults={}):
@@ -126,7 +126,7 @@ class SoSOptions():
             :returntype: SoSOptions
         """
         opts = SoSOptions(**vars(args), arg_defaults=arg_defaults)
-        opts._merge_opts(args, True)
+        opts._merge_opts(args, True, False)
         return opts
 
     @classmethod
@@ -161,20 +161,16 @@ class SoSOptions():
         if isinstance(self.arg_defaults[key], type(val)):
             return val
         if isinstance(self.arg_defaults[key], list):
-            return [v for v in val.split(',')]
+            return list(val.split(','))
         if isinstance(self.arg_defaults[key], bool):
             val = str_to_bool(val)
             if val is None:
                 raise Exception(
                     f"Value of '{key}' in {conf} must be True or False or "
                     "analagous")
-            else:
-                return val
+            return val
         if isinstance(self.arg_defaults[key], int):
-            try:
-                return int(val)
-            except ValueError:
-                raise Exception(f"Value of '{key}' in {conf} must be integer")
+            return int(val)
         return val
 
     def update_from_conf(self, config_file, component):
@@ -222,15 +218,9 @@ class SoSOptions():
 
         config = ConfigParser()
         try:
-            try:
-                with open(config_file) as f:
-                    config.read_file(f, config_file)
-            except DuplicateOptionError as err:
-                raise exit(f"Duplicate option '{err.option}' in section "
-                           f"'{err.section}' in file {config_file}")
-            except (ParsingError, Error):
-                raise exit(f'Failed to parse configuration file {config_file}')
-        except (OSError, IOError) as e:
+            with open(config_file, encoding='utf-8') as f:
+                config.read_file(f, config_file)
+        except OSError as e:
             print(
                 f'WARNING: Unable to read configuration file {config_file} : '
                 f'{e.args[1]}'
@@ -238,13 +228,14 @@ class SoSOptions():
 
         _update_from_section("global", config)
         _update_from_section(component, config)
-        if config.has_section("plugin_options") and hasattr(self, 'plugopts'):
+        if config.has_section("plugin_options") and hasattr(self, 'plugopts') \
+                and hasattr(self, 'skip_plugins'):
             # pylint: disable=no-member
             for key, val in config.items("plugin_options"):
                 if not key.split('.')[0] in self.skip_plugins:
                     self.plugopts.append(key + '=' + val)
 
-    def merge(self, src, skip_default=True):
+    def merge(self, src, skip_default=True, prefer_new=False):
         """Merge another set of ``SoSOptions`` into this object.
 
             Merge two ``SoSOptions`` objects by setting unset or default
@@ -252,12 +243,13 @@ class SoSOptions():
 
             :param src: the ``SoSOptions`` object to copy from
             :param is_default: ``True`` if new default values are to be set.
+            :param prefer_new: ``False`` if new default is not preferred.
         """
         for arg in self.arg_names:
             if not hasattr(src, arg):
                 continue
             if getattr(src, arg) is not None or not skip_default:
-                self._merge_opt(arg, src, False)
+                self._merge_opt(arg, src, False, prefer_new=prefer_new)
 
     def dict(self, preset_filter=True):
         """Return this ``SoSOptions`` option values as a dictionary of
@@ -337,7 +329,7 @@ class SosListOption(Action):
     """Allow to specify comma delimited list of plugins"""
 
     def __call__(self, parser, namespace, values, option_string=None):
-        items = [opt for opt in values.split(',')]
+        items = list(values.split(','))
         if getattr(namespace, self.dest):
             items += getattr(namespace, self.dest)
         setattr(namespace, self.dest, items)

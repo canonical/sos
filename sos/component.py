@@ -16,6 +16,7 @@ import tempfile
 import sys
 import time
 
+from textwrap import fill
 from argparse import SUPPRESS
 from datetime import datetime
 from getpass import getpass
@@ -131,7 +132,7 @@ class SoSComponent():
             self.manifest.add_field('compression', '')
             self.manifest.add_field('tmpdir', self.tmpdir)
             self.manifest.add_field('tmpdir_fs_type', self.tmpfstype)
-            self.manifest.add_field('policy', self.policy.distro)
+            self.manifest.add_field('policy', self.policy.os_release_name)
             self.manifest.add_section('components')
 
     def load_local_policy(self):
@@ -148,7 +149,7 @@ class SoSComponent():
         raise NotImplementedError
 
     def get_exit_handler(self):
-        def exit_handler(signum, frame):
+        def exit_handler(signum, frame):  # pylint: disable=unused-argument
             self.exit_process = True
             self._exit()
         return exit_handler
@@ -167,10 +168,7 @@ class SoSComponent():
         if self.opts.tmp_dir:
             tmpdir = os.path.abspath(self.opts.tmp_dir)
         else:
-            tmpdir = os.getenv('TMPDIR', None) or '/var/tmp'
-
-        if os.getenv('HOST', None) and os.getenv('container', None):
-            tmpdir = os.path.join(os.getenv('HOST'), tmpdir.lstrip('/'))
+            tmpdir = os.getenv('TMPDIR', None) or self.policy.get_tmp_dir(None)
 
         # no standard library method exists for this, so call out to stat to
         # avoid bringing in a dependency on psutil
@@ -191,7 +189,7 @@ class SoSComponent():
     def check_listing_options(self):
         opts = [o for o in self.opts.dict().keys() if o.startswith('list')]
         if opts:
-            return any([getattr(self.opts, opt) for opt in opts])
+            return any(getattr(self.opts, opt) for opt in opts)
         return False
 
     @classmethod
@@ -199,7 +197,7 @@ class SoSComponent():
         """This should be overridden by each subcommand to add its own unique
         options to the parser
         """
-        pass
+        raise NotImplementedError
 
     def apply_options_from_cmdline(self, opts):
         """(Re-)apply options specified via the cmdline to an options instance
@@ -243,7 +241,20 @@ class SoSComponent():
                         setattr(opts, oopt, [x for x in getattr(opts, oopt)
                                 if x not in common])
 
-            if val != opts.arg_defaults[opt]:
+            # plugin options as a list should be concatenated, not overriden
+            # BUT if cmdline plugoption overrides same option in opts, we must
+            # drop the opts's value; since the items are in form
+            # 'apache.log=on', we must separate the *name* of each option
+            if opt == 'plugopts':
+                oplugopts = getattr(opts, opt)
+                valnames = [v.split('=')[0] for v in val]
+                ovalnames = [v.split('=')[0] for v in oplugopts]
+                for common in set(valnames) & set(ovalnames):
+                    cstring = f"{common}="
+                    oplugopts = [oopt for oopt in oplugopts
+                                 if not oopt.startswith(cstring)]
+                setattr(opts, opt, list(set(val) | set(oplugopts)))
+            elif val != opts.arg_defaults[opt]:
                 setattr(opts, opt, val)
 
         return opts
@@ -289,7 +300,7 @@ class SoSComponent():
             if not self.preset:
                 self.preset = self.policy.probe_preset()
             # now merge preset options to opts
-            opts.merge(self.preset.opts)
+            opts.merge(self.preset.opts, prefer_new=True)
             # re-apply any cmdline overrides to the preset
             opts = self.apply_options_from_cmdline(opts)
 
@@ -353,8 +364,7 @@ class SoSComponent():
         if self.opts.encrypt:
             self._get_encryption_method()
         enc_opts = {
-            'encrypt': True if (self.opts.encrypt_pass or
-                                self.opts.encrypt_key) else False,
+            'encrypt': self.opts.encrypt_pass or self.opts.encrypt_key,
             'key': self.opts.encrypt_key,
             'password': self.opts.encrypt_pass
         }
@@ -459,6 +469,13 @@ class SoSComponent():
     def get_temp_file(self):
         return self.tempfile_util.new()
 
+    def _fmt_msg(self, msg):
+        width = 80
+        _fmt = ''
+        for line in msg.splitlines():
+            _fmt = _fmt + fill(line, width, replace_whitespace=False) + '\n'
+        return _fmt
+
 
 class SoSMetadata():
     """This class is used to record metadata from a sos execution that will
@@ -480,10 +497,7 @@ class SoSMetadata():
         return self._values[item]
 
     def __getattr__(self, attr):
-        try:
-            return self._values[attr]
-        except Exception:
-            raise AttributeError(attr)
+        return self._values[attr]
 
     def add_field(self, field_name, content):
         """Add a key, value entry to the current metadata instance

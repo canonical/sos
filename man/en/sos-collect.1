@@ -1,7 +1,7 @@
-.TH SOS COLLECT 1 "April 2020"
+.TH SOS_COLLECT 1 "April 2020"
 
 .SH NAME
-sos collect \- Collect sos reports from multiple (cluster) nodes
+sos_collect \- Collect sos reports from multiple (cluster) nodes
 .SH SYNOPSIS
 .B sos collect
     [\-a|\-\-all\-options]
@@ -41,6 +41,7 @@ sos collect \- Collect sos reports from multiple (cluster) nodes
     [\-\-skip-files FILES]
     [\-s|\-\-sysroot SYSROOT]
     [\-\-ssh\-user SSH_USER]
+    [\-\-sudo\-binary BINARY]
     [\-t|\-\-threads THREADS]
     [\-\-timeout TIMEOUT]
     [\-\-transport TRANSPORT]
@@ -74,8 +75,7 @@ This does NOT enable all sos collect options.
 Become the root user on the remote node when connecting as a non-root user.
 .TP
 \fB\-\-batch\fR
-Run in non-interactive mode. This will skip prompts for user input, with the
-exception of a prompt for the SSH password.
+Run in non-interactive mode. This will skip prompts for user input.
 .TP
 \fB\-\-all\-logs\fR
 Report option. Collects all logs regardless of size. 
@@ -161,7 +161,7 @@ rather than key-pair encryption.
 Specify an existing host group definition to use.
 
 Host groups are pre-defined settings for the cluster-type, primary node, and nodes options
-saved in JSON-formatted files under /var/lib/sos collect/<GROUP>.
+saved in JSON-formatted files under /etc/sos/groups.d/<GROUP>.
 
 If cluster_type and/or primary are set in the group, sos collect behaves as if
 these values were specified on the command-line.
@@ -169,7 +169,7 @@ these values were specified on the command-line.
 If nodes is defined, sos collect \fBextends\fR the \fB\-\-nodes\fR option, if set,
 with the nodes or regexes listed in the group.
 
-Note that sos collect will only write group definitions to /var/lib/sos collect/
+Note that sos collect will only write group definitions to /etc/sos/groups.d/
 however the GROUP value may be a filename for any group definitions that exist outside
 of the default location. If you are manually writing these files, use the value \fBnull\fR
 when a python NoneType is expected. Caveat: use \fBstring\fR 'none' if setting cluster_type
@@ -178,7 +178,7 @@ to none.
 \fB\-\-save\-group\fR GROUP
 Save the results of this run of sos collect to a host group definition.
 
-sos-collector will write a JSON-formatted file with name GROUP to /var/lib/sos collect/
+sos-collector will write a JSON-formatted file with name GROUP to /etc/sos/groups.d/
 with the settings for cluster-type, primary, and the node list as discovered by cluster enumeration.
 Note that this means regexes are not directly saved to host groups, but the results of matching against
 those regexes are.
@@ -336,6 +336,11 @@ for example \fB/etc/sos/*\fR.
 Specify an SSH user for sos collect to connect to nodes with. Default is root.
 
 sos collect will prompt for a sudo password for non-root users.
+.TP
+\fB\-\-sudo\-binary\fR BINARY
+Specify the binary to use for privilege escalation on remote hosts when connecting
+as a non-root user. Note that this binary MUST be in the connecting user's PATH
+on the remote host.
 .TP
 \fB\-s\fR SYSROOT, \fB\-\-sysroot\fR SYSROOT
 Report option. Specify an alternate root file system path.

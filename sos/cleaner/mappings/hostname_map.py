@@ -50,38 +50,6 @@ class SoSHostnameMap(SoSMap):
     _domains = {}
     hosts = {}
 
-    def load_domains_from_map(self):
-        """Because we use 'intermediary' dicts for host names and domain names
-        in this parser, we need to re-inject entries from the map_file into
-        these dicts and not just the underlying 'dataset' dict
-        """
-        for domain, ob_pair in self.dataset.items():
-            if len(domain.split('.')) == 1:
-                self.hosts[domain.split('.')[0]] = self.dataset[domain]
-            else:
-                if ob_pair.startswith('obfuscateddomain'):
-                    # directly exact domain matches
-                    self._domains[domain] = ob_pair.split('.')[0]
-                    continue
-                # strip the host name and trailing top-level domain so that
-                # we in inject the domain properly for later string matching
-
-                # note: this is artificially complex due to our stance on
-                # preserving TLDs. If in the future the project decides to
-                # obfuscate TLDs as well somehow, then this will all become
-                # much simpler
-                _domain_to_inject = '.'.join(domain.split('.')[1:-1])
-                if not _domain_to_inject:
-                    continue
-                for existing_domain in self.dataset.keys():
-                    _existing = '.'.join(existing_domain.split('.')[:-1])
-                    if _existing == _domain_to_inject:
-                        _ob_domain = '.'.join(
-                            self.dataset[existing_domain].split('.')[:-1]
-                        )
-                        self._domains[_domain_to_inject] = _ob_domain
-        self.set_initial_counts()
-
     def get_regex_result(self, item):
         """Override the base get_regex_result() to provide a regex that, if
         this is an FQDN or a straight domain, will include an underscore
@@ -89,7 +57,24 @@ class SoSHostnameMap(SoSMap):
         """
         if '.' in item:
             item = item.replace('.', '(\\.|_)')
-        return re.compile(item, re.I)
+        return super().get_regex_result(item)
+
+    def get_regex_fullword(self, item):
+        # we do match_full_words_only, so always wrap
+        return rf'(?<![a-z0-9])(?:{item})(?![a-z0-9])'
+
+    def get_regex_escape(self, item):
+        """Override the base get_regex_escape() to provide a regex that, if
+        this is an FQDN or a straight domain, will include an underscore
+        formatted regex as well.
+        """
+        # Build core allowing '.' or '_' at dot positions
+        if "." in item:
+            parts = [re.escape(p) for p in item.split('.')]
+            item = r'(?:\.|_)'.join(parts)
+        else:
+            item = re.escape(item)
+        return item
 
     def set_initial_counts(self):
         """Set the initial counter for host and domain obfuscation numbers
@@ -122,7 +107,7 @@ class SoSHostnameMap(SoSMap):
         if len(host) == 1:
             # don't block on host's shortname
             return host[0] in self.hosts
-        elif any([no_tld.endswith(_d) for _d in self._domains]):
+        if any(no_tld.endswith(_d) for _d in self._domains):
             return True
 
         return False
@@ -153,7 +138,7 @@ class SoSHostnameMap(SoSMap):
             ext = '.' + item.split('.')[-1]
             item = item.replace(ext, '')
             suffix += ext
-        if item not in self.dataset.keys():
+        if item not in self.dataset:
             # try to account for use of '-' in names that include hostnames
             # and don't create new mappings for each of these
             for _existing in sorted(self.dataset.keys(), reverse=True,
@@ -163,17 +148,17 @@ class SoSHostnameMap(SoSMap):
                 _h = _existing.split('.')
                 # avoid considering a full FQDN match as a new match off of
                 # the hostname of an existing match
-                if _h[0] and _h[0] in self.hosts.keys():
+                if _h[0] and _h[0] in self.hosts:
                     _host_substr = True
                 if len(_test) == 1 or not _test[0]:
                     # does not match existing obfuscation
                     continue
-                elif not _host_substr and (_test[0].endswith('.') or
-                                           item.endswith(_existing)):
+                if not _host_substr and (_test[0].endswith('.') or
+                                         item.endswith(_existing)):
                     # new hostname in known domain
                     final = super().get(item)
                     break
-                elif item.split(_test[0]):
+                if item.split(_test[0]):
                     # string that includes existing FQDN obfuscation substring
                     # so, only obfuscate the FQDN part
                     try:
@@ -196,7 +181,7 @@ class SoSHostnameMap(SoSMap):
         if len(host) == 2:
             # we have just a domain name, e.g. example.com
             dname = self.sanitize_domain(host)
-            if all([h.isupper() for h in host]):
+            if all(h.isupper() for h in host):
                 dname = dname.upper()
             return dname
         if len(host) > 2:
@@ -215,7 +200,7 @@ class SoSHostnameMap(SoSMap):
             ob_domain = self.sanitize_domain(domain)
             self.dataset[item] = ob_domain
             _fqdn = '.'.join([ob_hostname, ob_domain])
-            if all([h.isupper() for h in host]):
+            if all(h.isupper() for h in host):
                 _fqdn = _fqdn.upper()
             return _fqdn
         return None

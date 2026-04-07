@@ -29,6 +29,7 @@ class OpenStackNova(Plugin):
     var_puppet_gen = "/var/lib/config-data/puppet-generated/nova"
     service_name = "openstack-nova-api.service"
     apachepkg = None
+    postproc_dirs = ["/etc/nova/",]
 
     def setup(self):
 
@@ -141,24 +142,23 @@ class OpenStackNova(Plugin):
         self.add_copy_spec(specs)
 
     def apply_regex_sub(self, regexp, subst):
-        """ Apply regex substitution """
-        self.do_path_regex_sub("/etc/nova/*", regexp, subst)
-        for npath in ['', '_libvirt', '_metadata', '_placement']:
-            self.do_path_regex_sub(
-                f"{self.var_puppet_gen}{npath}/etc/nova/*",
-                regexp, subst)
+        """ Apply regex substitution to all sensitive dirs """
+        for _dir in self.postproc_dirs:
+            self.do_path_regex_sub(f"{_dir}/*", regexp, subst)
+            for npath in ['', '_libvirt', '_metadata', '_placement']:
+                self.do_path_regex_sub(
+                    f"{self.var_puppet_gen}{npath}{_dir}/*",
+                    regexp, subst)
 
     def postproc(self):
         protect_keys = [
-            "ldap_dns_password", "neutron_admin_password", "rabbit_password",
-            "qpid_password", "powervm_mgr_passwd", "virtual_power_host_pass",
-            "xenapi_connection_password", "password", "host_password",
-            "vnc_password", "admin_password", "connection_password",
-            "memcache_secret_key", "s3_secret_key",
-            "metadata_proxy_shared_secret", "fixed_key", "transport_url",
-            "rbd_secret_uuid"
+            ".*_key",
+            ".*_pass(wd|word)?",
+            "password",
+            "metadata_proxy_shared_secret",
+            "rbd_secret_uuid",
         ]
-        connection_keys = ["connection", "sql_connection"]
+        connection_keys = ["connection", "sql_connection", "transport_url"]
 
         join_con_keys = "|".join(connection_keys)
 
@@ -214,6 +214,7 @@ class RedHatNova(OpenStackNova, RedHatPlugin):
     apachepkg = "httpd"
     nova = False
     packages = ('openstack-selinux',)
+    postproc_dirs = ["/etc/nova/", "/var/lib/openstack/config/nova"]
 
     def setup(self):
         super().setup()

@@ -7,7 +7,7 @@
 # See the LICENSE file in the source distribution for further information.
 
 
-from sos_tests import StageOneReportTest, redhat_only, ubuntu_only
+from sos_tests import StageOneReportTest, redhat_only, debian_only
 
 # known values in our CI test images
 FOREMAN_DB_PASSWORD = r'S0Sdb=p@ssw0rd!'
@@ -73,6 +73,11 @@ class ForemanBasicTest(StageOneReportTest):
             "sos_commands/foreman/smart_proxies_features/*"
         )
 
+    def test_cv_filters_not_collected(self):
+        self.assertFileGlobNotInArchive(
+            "sos_commands/foreman/content_view_filters/*"
+        )
+
     def test_foreman_config_postproc_worked(self):
         self.assertFileNotHasContent(
             '/etc/foreman/database.yml',
@@ -104,7 +109,7 @@ class ForemanBasicTest(StageOneReportTest):
     def test_foreman_httpd_collected(self):
         self.assertFileGlobInArchive("/var/log/httpd*/foreman-ssl_*_ssl*log*")
 
-    @ubuntu_only
+    @debian_only
     def test_foreman_apache_collected(self):
         self.assertFileGlobInArchive("/var/log/apache2/foreman-ssl_*_ssl*log*")
 
@@ -119,13 +124,19 @@ class ForemanWithOptionsTest(StageOneReportTest):
     :avocado: tags=foreman
     """
 
-    sos_cmd = '-v -k foreman.proxyfeatures=on'
+    sos_cmd = '-v -k foreman.proxyfeatures=on -k foreman.cvfilters=on'
     arch = ['x86_64']
 
     @redhat_only
     def test_proxyfeatures_collected(self):
         self.assertFileGlobInArchive(
             "sos_commands/foreman/smart_proxies_features/*"
+        )
+
+    @redhat_only
+    def test_cv_filters_collected(self):
+        self.assertFileGlobInArchive(
+            "sos_commands/foreman/content_view_filters/*"
         )
 
 

@@ -28,9 +28,9 @@ class SoSCleanerParser():
     :cvar name:     The parser name, used in logging errors
     :vartype name: ``str``
 
-    :cvar regex_patterns:   A list of regex patterns to iterate over for every
-                            line processed
-    :vartype regex_patterns: ``list``
+    :cvar regex_pattern:   A static (compiled) regex pattern to check for every
+                           line processed
+    :vartype regex_pattern: ``re.Pattern``
 
     :cvar mapping: Used by the parser to store and obfuscate matches
     :vartype mapping: ``SoSMap()``
@@ -42,7 +42,7 @@ class SoSCleanerParser():
     """
 
     name = 'Undefined Parser'
-    regex_patterns = []
+    regex_pattern = re.compile(r'(?!)')  # match nothing
     skip_line_patterns = []
     parser_skip_files = []  # list of skip files relevant to a parser
     skip_cleaning_files = []   # list of global skip files from cmdline args
@@ -54,6 +54,9 @@ class SoSCleanerParser():
             self.mapping.conf_update(config[self.map_file_key])
         self.skip_cleaning_files = skip_cleaning_files
         self._generate_skip_regexes()
+
+    def load_map_entries(self):
+        self.mapping.load_entries()
 
     def _generate_skip_regexes(self):
         """Generate the regexes for the parser's configured parser_skip_files
@@ -107,10 +110,11 @@ class SoSCleanerParser():
         :rtype:     ``str``, ``int``
         """
         count = 0
-        for item, reg in self.mapping.compiled_regexes:
-            if reg.search(line):
-                line, _count = reg.subn(self.mapping.get(item.lower()), line)
-                count += _count
+        if self.mapping.compiled_search.search(line):
+            for item, reg in self.mapping.compiled_regexes:
+                if reg.search(line):
+                    line, _count = reg.subn(self.mapping.get(item), line)
+                    count += _count
         return line, count
 
     def _parse_line(self, line):
@@ -124,18 +128,17 @@ class SoSCleanerParser():
         :rtype: ``tuple``, ``(str, int))``
         """
         count = 0
-        for pattern in self.regex_patterns:
-            matches = [m[0] for m in re.findall(pattern, line, re.I)]
-            if matches:
-                matches.sort(reverse=True, key=len)
-                count += len(matches)
-                for match in matches:
-                    match = match.strip()
-                    if match in self.mapping.dataset.values():
-                        continue
-                    new_match = self.mapping.get(match)
-                    if new_match != match:
-                        line = line.replace(match, new_match)
+        matches = [m[0] for m in self.regex_pattern.findall(line)]
+        if matches:
+            matches.sort(reverse=True, key=len)
+            count += len(matches)
+            for match in matches:
+                match = match.strip()
+                if match in self.mapping.dataset.values():
+                    continue
+                new_match = self.mapping.get(match)
+                if new_match != match:
+                    line = line.replace(match, new_match)
         return line, count
 
     def parse_string_for_keys(self, string_data):
@@ -155,8 +158,7 @@ class SoSCleanerParser():
         if self.compile_regexes:
             for item, reg in self.mapping.compiled_regexes:
                 if reg.search(string_data):
-                    string_data = reg.sub(self.mapping.get(item.lower()),
-                                          string_data)
+                    string_data = reg.sub(self.mapping.get(item), string_data)
         else:
             for k, ob in sorted(self.mapping.dataset.items(), reverse=True,
                                 key=lambda x: len(x[0])):

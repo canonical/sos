@@ -48,13 +48,6 @@ class Podman(Plugin, RedHatPlugin, UbuntuPlugin):
     ]
 
     def setup(self):
-        self.add_env_var([
-            'HTTP_PROXY',
-            'HTTPS_PROXY',
-            'NO_PROXY',
-            'ALL_PROXY'
-        ])
-
         self.add_cmd_tags({
             'podman images': 'podman_list_images',
             'podman ps': 'podman_list_containers'
@@ -62,6 +55,7 @@ class Podman(Plugin, RedHatPlugin, UbuntuPlugin):
 
         subcmds = [
             'info',
+            'image trust show',
             'images',
             'images --digests',
             'pod ps',
@@ -70,7 +64,8 @@ class Podman(Plugin, RedHatPlugin, UbuntuPlugin):
             'ps -a',
             'stats --no-stream --all',
             'version',
-            'volume ls'
+            'volume ls',
+            'system df -v',
         ]
 
         self.add_cmd_output([f"podman {s}" for s in subcmds])
@@ -109,6 +104,11 @@ class Podman(Plugin, RedHatPlugin, UbuntuPlugin):
             insp = name if 'none' not in name else img_id
             self.add_cmd_output(f"podman inspect {insp}", subdir='images',
                                 tags='podman_image_inspect')
+            self.add_cmd_output(
+                f"podman image tree {insp}",
+                subdir='images/tree',
+                tags='podman_image_tree'
+            )
 
         for vol in volumes:
             self.add_cmd_output(f"podman volume inspect {vol}",

@@ -20,7 +20,7 @@ class FullCleanTest(StageTwoReportTest):
     :avocado: tags=stagetwo
     """
 
-    sos_cmd = '-v --clean'
+    sos_cmd = '--clean'
     sos_timeout = 600
     # replace with an empty placeholder, make sure that this test case is not
     # influenced by previous clean runs
@@ -38,10 +38,10 @@ class FullCleanTest(StageTwoReportTest):
         short = host.split('.')[0]
         sosfd = journal.stream('sos-testing')
         sosfd.write(
-            "This is a test line from sos clean testing. The hostname %s "
-            "should not appear, nor should %s in an obfuscated archive. The "
-            "shortnames of %s and %s should also not appear."
-            % (host.lower(), host.upper(), short.lower(), short.upper())
+            f"This is a test line from sos clean testing. The hostname "
+            f"{host.lower()} should not appear, nor should {host.upper()} "
+            f"in an obfuscated archive. The shortnames of {short.lower()} "
+            f"and {short.upper()} should also not appear."
         )
 
     def test_private_map_was_generated(self):
@@ -64,7 +64,10 @@ class FullCleanTest(StageTwoReportTest):
         host = self.sysinfo['pre']['networking']['hostname']
         short = host.split('.')[0]
         # much faster to just use grep here
-        content = self.grep_for_content(host) + self.grep_for_content(short)
+        host = rf'(?<![a-z0-9]){re.escape(host)}(?=\b|_|-)'
+        short = rf'(?<![a-z0-9]){re.escape(short)}(?=\b|_|-)'
+        content = self.grep_for_content(host, regexp=True) + \
+            self.grep_for_content(short, regexp=True)
         if not content:
             assert True
         else:
@@ -77,12 +80,12 @@ class FullCleanTest(StageTwoReportTest):
             '/.*sosreport-.*-private_map',
             self.cmd_output.stdout
         )[-1]
-        with open(map_file, 'r') as mf:
+        with open(map_file, 'r', encoding='utf-8') as mf:
             map_json = json.load(mf)
         for mapping in map_json:
             for key, val in map_json[mapping].items():
-                assert key, "Empty key found in %s" % mapping
-                assert val, "%s mapping for '%s' empty" % (mapping, key)
+                assert key, f"Empty key found in {mapping}"
+                assert val, f"{mapping} mapping for '{key}' empty"
 
     def test_ip_not_in_any_file(self):
         ip = self.sysinfo['pre']['networking']['ip_addr']

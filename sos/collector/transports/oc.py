@@ -167,7 +167,7 @@ class OCTransport(RemoteTransport):
         podconf = self.get_node_pod_config()
         self.pod_name = podconf['metadata']['name']
         fd, self.pod_tmp_conf = tempfile.mkstemp(dir=self.tmpdir)
-        with open(fd, 'w') as cfile:
+        with open(fd, 'w', encoding='utf-8') as cfile:
             json.dump(podconf, cfile)
         self.log_debug(f"Starting sos collector container '{self.pod_name}'")
         # this specifically does not need to run with a project definition
@@ -231,6 +231,13 @@ class OCTransport(RemoteTransport):
     def remote_exec(self):
         return (f"oc -n {self.project} exec --request-timeout=0 "
                 f"{self.pod_name} -- /bin/bash -c")
+
+    def _copy_file_to_remote(self, fname, dest):
+        result = self.run_oc("cp --retries", stderr=True)
+        flags = '' if "unknown flag" in result["output"] else '--retries=5'
+        cmd = self.run_oc(f"cp {flags} {fname} {self.pod_name}:{dest}",
+                          timeout=15)
+        return cmd['status'] == 0
 
     def _retrieve_file(self, fname, dest):
         # check if --retries flag is available for given version of oc

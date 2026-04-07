@@ -6,7 +6,6 @@
 #
 # See the LICENSE file in the source distribution for further information.
 
-import os
 
 from sos.report.plugins import UbuntuPlugin
 from sos.policies.distros.debian import DebianPolicy
@@ -17,12 +16,13 @@ from sos.policies.package_managers import MultiPackageManager
 
 
 class UbuntuPolicy(DebianPolicy):
-    distro = "Ubuntu"
     vendor = "Canonical"
     vendor_urls = [
         ('Community Website', 'https://www.ubuntu.com/'),
         ('Commercial Support', 'https://www.canonical.com')
     ]
+    os_release_name = 'Ubuntu'
+    os_release_file = ''
     PATH = "/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games" \
            + ":/usr/local/sbin:/usr/local/bin:/snap/bin"
     _upload_url = "https://files.support.canonical.com/uploads/"
@@ -52,25 +52,11 @@ class UbuntuPolicy(DebianPolicy):
 
         self.valid_subclasses += [UbuntuPlugin]
 
-    @classmethod
-    def check(cls, remote=''):
-        """This method checks to see if we are running on Ubuntu.
-           It returns True or False."""
-
-        if remote:
-            return cls.distro in remote
-
-        try:
-            with open('/etc/lsb-release', 'r') as fp:
-                return "Ubuntu" in fp.read()
-        except IOError:
-            return False
-
     def dist_version(self):
         """ Returns the version stated in DISTRIB_RELEASE
         """
         try:
-            with open('/etc/lsb-release', 'r') as fp:
+            with open('/etc/lsb-release', 'r', encoding='utf-8') as fp:
                 lines = fp.readlines()
                 for line in lines:
                     if "DISTRIB_RELEASE" in line:
@@ -79,24 +65,5 @@ class UbuntuPolicy(DebianPolicy):
         except (IOError, ValueError):
             return False
 
-    def get_upload_https_auth(self):
-        if self.upload_url.startswith(self._upload_url):
-            return (self._upload_user, self._upload_password)
-        else:
-            return super().get_upload_https_auth()
-
-    def get_upload_url_string(self):
-        if self.upload_url.startswith(self._upload_url):
-            return "Canonical Support File Server"
-        else:
-            return self.get_upload_url()
-
-    def get_upload_url(self):
-        if not self.upload_url or self.upload_url.startswith(self._upload_url):
-            if not self.upload_archive_name:
-                return self._upload_url
-            fname = os.path.basename(self.upload_archive_name)
-            return self._upload_url + fname
-        return super().get_upload_url()
 
 # vim: set et ts=4 sw=4 :

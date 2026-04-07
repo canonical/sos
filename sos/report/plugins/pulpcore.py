@@ -27,10 +27,12 @@ class PulpCore(Plugin, IndependentPlugin):
     dbhost = "localhost"
     dbport = 5432
     dbname = "pulpcore"
+    dbuser = "pulp"
     dbpasswd = ""
     staticroot = "/var/lib/pulp/assets"
     uploaddir = "/var/lib/pulp/media/upload"
     env = {"PGPASSWORD": dbpasswd}
+    settings_file = "/etc/pulp/settings.py"
 
     def parse_settings_config(self):
         """ Parse pulp settings """
@@ -46,7 +48,7 @@ class PulpCore(Plugin, IndependentPlugin):
             return val
 
         try:
-            with open("/etc/pulp/settings.py", 'r', encoding='UTF-8') as file:
+            with open(self.settings_file, 'r', encoding='UTF-8') as file:
                 # split the lines to "one option per line" format
                 for line in file.read() \
                         .replace(',', ',\n').replace('{', '{\n') \
@@ -66,6 +68,8 @@ class PulpCore(Plugin, IndependentPlugin):
                         self.dbport = separate_value(line)
                     if databases_scope and match(pattern % 'NAME', line):
                         self.dbname = separate_value(line)
+                    if databases_scope and match(pattern % 'USER', line):
+                        self.dbuser = separate_value(line)
                     if databases_scope and match(pattern % 'PASSWORD', line):
                         self.dbpasswd = separate_value(line)
                     # if line contains closing '}' database_scope end
@@ -84,32 +88,56 @@ class PulpCore(Plugin, IndependentPlugin):
         self.env = {"PGPASSWORD": self.dbpasswd}
 
     def setup(self):
+        self.runas = self.in_container = None
+        rhui_podman_ps = self.exec_cmd("podman ps --filter name=rhui5-rhua",
+                                       runas="rhui")
+        if rhui_podman_ps['status'] == 0:
+            lines = rhui_podman_ps['output'].splitlines()
+            if len(lines) > 1:  # we know there is a container of given name
+                self.runas = 'rhui'
+                self.in_container = 'rhui5-rhua'
+                self.settings_file = '/var/lib/rhui/config/pulp/settings.py'
         self.parse_settings_config()
 
         self.add_copy_spec([
             "/etc/pulp/settings.py",
             "/etc/pki/pulp/*"
-        ])
+        ], runas=self.runas, container=self.in_container)
+
         # skip collecting certificate keys
         self.add_forbidden_path("/etc/pki/pulp/**/*.key")
 
         self.add_cmd_output("curl -ks https://localhost/pulp/api/v3/status/",
-                            suggest_filename="pulp_status")
+                            suggest_filename="pulp_status", runas=self.runas,
+                            container=self.in_container)
         dynaconf_env = {"LC_ALL": "en_US.UTF-8",
                         "PULP_SETTINGS": "/etc/pulp/settings.py",
                         "DJANGO_SETTINGS_MODULE": "pulpcore.app.settings"}
-        self.add_cmd_output("dynaconf list", env=dynaconf_env)
+        self.add_cmd_output("dynaconf list", env=dynaconf_env,
+                            runas=self.runas, container=self.in_container)
         for _dir in [self.staticroot, self.uploaddir]:
-            self.add_dir_listing(_dir)
+            self.add_dir_listing(_dir, runas=self.runas,
+                                 container=self.in_container)
 
         task_days = self.get_option('task-days')
         for table in ['core_task', 'core_taskgroup',
                       'core_groupprogressreport', 'core_progressreport']:
-            _query = (f"select * from {table} where pulp_last_updated > NOW()"
-                      f" - interval '{task_days} days' order by"
+            _query = ("COPY (SELECT STRING_AGG(column_name, ', ') FROM "
+                      f"information_schema.columns WHERE table_name='{table}'"
+                      "AND table_schema = 'public' AND column_name NOT IN"
+                      " ('args', 'kwargs', 'enc_args', 'enc_kwargs'))"
+                      " TO STDOUT;")
+            col_out = self.exec_cmd(self.build_query_cmd(_query, csv=False),
+                                    env=self.env,
+                                    runas=self.runas,
+                                    container=self.in_container)
+            columns = col_out['output'] if col_out['status'] == 0 else '*'
+            _query = (f"select {columns} from {table} where pulp_last_updated"
+                      f"> NOW() - interval '{task_days} days' order by"
                       " pulp_last_updated")
-            _cmd = self.build_query_cmd(_query)
-            self.add_cmd_output(_cmd, env=self.env, suggest_filename=table)
+            _cmd = self.build_query_cmd(_query, csv=True)
+            self.add_cmd_output(_cmd, env=self.env, suggest_filename=table,
+                                runas=self.runas, container=self.in_container)
 
         # collect tables sizes, ordered
         _cmd = self.build_query_cmd(
@@ -125,10 +153,12 @@ class PulpCore(Plugin, IndependentPlugin):
             "pg_total_relation_size(reltoastrelid) AS toast_bytes "
             "FROM pg_class c LEFT JOIN pg_namespace n ON "
             "n.oid = c.relnamespace WHERE relkind = 'r') a) a order by "
-            "total_bytes DESC"
+            "total_bytes DESC",
+            csv=False
         )
         self.add_cmd_output(_cmd, suggest_filename='pulpcore_db_tables_sizes',
-                            env=self.env)
+                            env=self.env, runas=self.runas,
+                            container=self.in_container)
 
     def build_query_cmd(self, query, csv=False):
         """
@@ -140,23 +170,23 @@ class PulpCore(Plugin, IndependentPlugin):
         """
         if csv:
             query = f"COPY ({query}) TO STDOUT " \
-                    "WITH (FORMAT 'csv', DELIMITER ',', HEADER)"
-        _dbcmd = "psql --no-password -h %s -p %s -U pulp -d %s -c %s"
-        return _dbcmd % (self.dbhost, self.dbport, self.dbname, quote(query))
+                    "WITH (FORMAT 'csv', DELIMITER ';', HEADER)"
+        _dbcmd = "psql --no-password -h %s -p %s -U %s -d %s -c %s"
+        return _dbcmd % (self.dbhost, self.dbport,
+                         self.dbuser, self.dbname, quote(query))
 
     def postproc(self):
         # obfuscate from /etc/pulp/settings.py and "dynaconf list":
         # SECRET_KEY = "eKfeDkTnvss7p5WFqYdGPWxXfHnsbDBx"
         # 'PASSWORD': 'tGrag2DmtLqKLTWTQ6U68f6MAhbqZVQj',
         # AUTH_LDAP_BIND_PASSWORD = 'ouch-a-secret'
-        # the PASSWORD can be also in an one-liner list, so detect its value
-        # in non-greedy manner till first ',' or '}'
-        key_pass_re = r"((?:SECRET_KEY|AUTH_LDAP_BIND_PASSWORD)" \
-                      r"(?:\<.+\>)?(\s*=)?|(password|PASSWORD)" \
-                      r"(\"|'|:)+)\s*(\S*)"
-        repl = r"\1 ********"
-        self.do_path_regex_sub("/etc/pulp/settings.py", key_pass_re, repl)
-        self.do_cmd_output_sub("dynaconf list", key_pass_re, repl)
+        # and also one-liners like
+        # 'SECRET_KEY': 'dontreadit', "PASSWORD": "c0nf1d3nt1al",
+        reg = r"((SECRET_KEY|AUTH_LDAP_BIND_PASSWORD|password|PASSWORD)" \
+              r"(\"|'|:|=|\s)+)([^\s'\"]+)"
+        repl = r"\1********"
+        self.do_path_regex_sub("/etc/pulp/settings.py", reg, repl)
+        self.do_cmd_output_sub("dynaconf list", reg, repl)
 
 
 # vim: set et ts=4 sw=4 :

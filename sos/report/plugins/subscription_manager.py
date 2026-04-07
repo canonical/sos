@@ -8,7 +8,9 @@
 
 from configparser import NoOptionError, NoSectionError
 import glob
+from os import remove
 from sos.report.plugins import Plugin, RedHatPlugin
+from sos.utilities import sos_parse_version
 
 
 class SubscriptionManager(Plugin, RedHatPlugin):
@@ -20,6 +22,8 @@ class SubscriptionManager(Plugin, RedHatPlugin):
 
     files = ('/etc/rhsm/rhsm.conf',)
     packages = ('subscription-manager',)
+
+    curl_config = 'rhsm_curl_cfg'
 
     def get_proxy_string(self, config):
         """ return curl options --proxy[-user] per RHSM config """
@@ -33,10 +37,16 @@ class SubscriptionManager(Plugin, RedHatPlugin):
             proxy = f"--proxy {proxy_scheme}://{proxy_hostname}{proxy_port}"
         proxy_user = config.get('server', 'proxy_user')
         if proxy and proxy_user:
-            proxy += f" --proxy-user {proxy_user}"
-            proxy_password = config.get('server', 'proxy_password')
-            if proxy_password:
-                proxy += f":{proxy_password}"
+            proxy_pass = config.get('server', 'proxy_password')
+            if proxy_pass:
+                self._curl_cfg_fname = self.archive.dest_path(self.curl_config)
+                with open(self._curl_cfg_fname, 'w', encoding='utf-8') as _f:
+                    _f.write(
+                        f"--proxy-user {proxy_user}:{proxy_pass}"
+                    )  # codeql[py/clear-text-storage-sensitive-data]
+                proxy += f" --config {self._curl_cfg_fname}"
+            else:
+                proxy += f" --proxy-user {proxy_user}"
         return proxy
 
     def get_server_url(self, config):
@@ -58,19 +68,26 @@ class SubscriptionManager(Plugin, RedHatPlugin):
             "/var/log/rhsm/rhsmcertd.log"])
         self.add_cmd_output("subscription-manager identity",
                             tags="subscription_manager_id")
-        self.add_cmd_output("subscription-manager list --consumed",
-                            tags="subscription_manager_list_consumed")
         self.add_cmd_output("subscription-manager list --installed",
                             tags="subscription_manager_installed")
         self.add_cmd_output([
-            "subscription-manager list --available",
-            "subscription-manager list --all --available",
             "subscription-manager release --show",
             "subscription-manager release --list",
             "syspurpose show",
             "subscription-manager syspurpose --show",
             "subscription-manager status",
+            "subscription-manager facts",
         ], cmd_as_tag=True)
+        # Deprecated options in RHEL 10, that throw errors when run
+        smpkg = self.policy.package_manager.pkg_by_name('subscription-manager')
+        if smpkg is not None:
+            sm_version = '.'.join(smpkg['version'])
+            if sos_parse_version(sm_version) < sos_parse_version('1.30.3-1'):
+                self.add_cmd_output([
+                                "subscription-manager list --available",
+                                "subscription-manager list --all --available",
+                                "subscription-manager list --consumed",
+                ], cmd_as_tag=True)
         self.add_cmd_output("rhsm-debug system --sos --no-archive "
                             "--no-subscriptions --destination "
                             f"{self.get_cmd_output_path()}")
@@ -83,6 +100,7 @@ class SubscriptionManager(Plugin, RedHatPlugin):
         curlcmd = "curl -vv --cacert /etc/rhsm/ca/redhat-uep.pem " \
                   "https://subscription.rhsm.redhat.com:443/subscription"
         env = None  # for no_proxy
+        self._curl_cfg_fname = None
         try:
             from rhsm.config import get_config_parser  # pylint: disable=C0415
             config = get_config_parser()
@@ -114,5 +132,12 @@ class SubscriptionManager(Plugin, RedHatPlugin):
         regexp = r"(password(\s)*=(\s)*)(\S+)\n"
         repl = r"\1********\n"
         self.do_path_regex_sub("/var/lib/rhsm/repo_server_val/*", regexp, repl)
+        # if curl used config file to hide proxy password, remove the file
+        if self._curl_cfg_fname:
+            remove(self._curl_cfg_fname)
+        # Remove proxy information from curl command
+        http_proxy_regexp = r"(http(s)?://)\S+:\S+(@.*)"
+        http_proxy_repl = r"\1******:******\3"
+        self.do_cmd_output_sub('*curl*', http_proxy_regexp, http_proxy_repl)
 
 # vim: et ts=4 sw=4

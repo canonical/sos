@@ -57,7 +57,7 @@ class Processor(Plugin, IndependentPlugin):
         ], cmd_as_tag=True)
 
         if (isinstance(self.policy, UbuntuPolicy) and
-                self.policy.dist_version() >= 24.04):
+                self.policy.dist_version() >= 20.04):
             self.cpu_kmods = ['msr']
 
         cpupower_pred = SoSPredicate(self, kmods=self.cpu_kmods)
@@ -66,8 +66,10 @@ class Processor(Plugin, IndependentPlugin):
             "cpupower frequency-info",
             "cpupower info",
             "cpupower idle-info",
-            "turbostat --debug sleep 10",
         ], cmd_as_tag=True, pred=cpupower_pred)
+
+        self.add_cmd_output("turbostat --debug sleep 10", cmd_as_tag=True,
+                            pred=cpupower_pred, timeout=15)
 
         if '86' in self.policy.get_arch():
             self.add_cmd_output("x86info -a")

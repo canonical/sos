@@ -1,6 +1,6 @@
-.TH SOS REPORT 1 "Mon Mar 25 2013"
+.TH SOS_REPORT 1 "Mon Mar 25 2013"
 .SH NAME
-sos report \- Collect and package diagnostic and support data
+sos_report \- Collect and package diagnostic and support data
 .SH SYNOPSIS
 .B sos report
           [-l|--list-plugins]\fR
@@ -8,7 +8,7 @@ sos report \- Collect and package diagnostic and support data
           [-e|--enable-plugins plugin-names]\fR
           [-o|--only-plugins plugin-names]\fR
           [-a|--alloptions] [-v|--verbose]\fR
-          [-k plug.opt|--plugin-option plug.opt]\fR
+          [-k plug.opt|--plugin-option plug.opt]|--plugopts plug.opt\fR
           [--no-report] [--config-file conf]\fR
           [--no-postproc]\fR
           [--preset preset] [--add-preset add_preset]\fR
@@ -84,7 +84,8 @@ Enable the specified plugin(s) only (all other plugins should be
 disabled). Multiple plugins may be specified by repeating the option
 or as a comma-separated list.
 .TP
-.B \-k PLUGNAME.PLUGOPT[=VALUE], \--plugin-option=PLUGNAME.PLUGOPT[=VALUE]
+.B \-k PLUGNAME.PLUGOPT[=VALUE], \--plugin-option=PLUGNAME.PLUGOPT[=VALUE], \
+\--plugopts=PLUGNAME.PLUGOPT[=VALUE]
 Specify plug-in options. The option PLUGOPT is enabled, or set to the
 specified value in the plug-in PLUGNAME.
 .TP
@@ -122,7 +123,7 @@ example a preset may enable a certain set of plugins, disable others, or enable
 specific plugin options. They may also specify sos options such as log-size or
 package verification.
 
-User defined presets are saved under /var/lib/sos/presets as JSON-formatted files.
+User defined presets are saved under /etc/sos/presets.d as JSON-formatted files.
 .TP
 .B \--add-preset ADD_PRESET [options]
 Add a preset with name ADD_PRESET that enables [options] when called.
@@ -313,7 +314,7 @@ a timeout for a specific plugin, use the 'timeout' plugin option available to
 all plugins - e.g. '-k logs.timeout=600'.
 
 The plugin-specific timeout option will override this option. For example, using
-\'--plugin-timeout=60 -k logs.timeout=600\' will set a timeout of 600 seconds for
+\(aq--plugin-timeout=60 -k logs.timeout=600' will set a timeout of 600 seconds for
 the logs plugin and 60 seconds for all other enabled plugins.
 .TP
 .B \--cmd-timeout TIMEOUT
@@ -382,7 +383,7 @@ to prevent sos report working dir to consume all free disk space. No plugin data
 is available at the end.
 
 Plugins will be collected sequentially, size of collected files and commands outputs
-will be calculated and the plugin files will be immediatelly deleted prior execution
+will be calculated and the plugin files will be immediately deleted prior execution
 of the next plugin. This still can consume whole free disk space, though.
 
 Please note, size estimations may not be accurate for highly utilized systems due to

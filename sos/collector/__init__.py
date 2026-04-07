@@ -26,13 +26,13 @@ from concurrent.futures import ThreadPoolExecutor
 from getpass import getpass
 from pathlib import Path
 from shlex import quote
-from textwrap import fill
 from sos.cleaner import SoSCleaner
 from sos.collector.sosnode import SosNode
 from sos.options import ClusterOption, str_to_bool
 from sos.component import SoSComponent
 from sos.utilities import bold
 from sos import __version__
+from sos.upload import SoSUpload
 
 COLLECTOR_CONFIG_DIR = '/etc/sos/groups.d'
 
@@ -88,6 +88,7 @@ class SoSCollector(SoSComponent):
         'encrypt_pass': '',
         'group': None,
         'image': '',
+        'inherit_config_file': False,
         'force_pull_image': True,
         'skip_cleaning_files': [],
         'jobs': 4,
@@ -102,6 +103,7 @@ class SoSCollector(SoSComponent):
         'map_file': '/etc/sos/cleaner/default_mapping',
         'primary': '',
         'namespaces': None,
+        'node_config_file': None,
         'nodes': [],
         'no_env_vars': False,
         'no_local': False,
@@ -126,8 +128,10 @@ class SoSCollector(SoSComponent):
         'ssh_key': '',
         'ssh_port': 22,
         'ssh_user': 'root',
+        'sudo_binary': 'sudo',
         'timeout': 600,
         'transport': 'auto',
+        'treat_certificates': 'obfuscate',
         'verify': False,
         'usernames': [],
         'upload': False,
@@ -143,7 +147,8 @@ class SoSCollector(SoSComponent):
         'upload_s3_bucket': None,
         'upload_s3_access_key': None,
         'upload_s3_secret_key': None,
-        'upload_s3_object_prefix': None
+        'upload_s3_object_prefix': None,
+        'upload_target': None
     }
 
     def __init__(self, parser, parsed_args, cmdline_args):
@@ -169,9 +174,9 @@ class SoSCollector(SoSComponent):
         # get the local hostname and addresses to filter from results later
         self.hostname = socket.gethostname()
         try:
-            self.ip_addrs = list(set([
+            self.ip_addrs = list({
                 i[4][0] for i in socket.getaddrinfo(socket.gethostname(), None)
-            ]))
+            })
         except Exception:
             # this is almost always a DNS issue with reverse resolution
             # set a safe fallback and log the issue
@@ -195,8 +200,6 @@ class SoSCollector(SoSComponent):
 
             except KeyboardInterrupt:
                 self.exit('Exiting on user cancel', 130)
-            except Exception:
-                raise
 
     def load_clusters(self):
         """Loads all cluster types supported by the local installation for
@@ -237,7 +240,7 @@ class SoSCollector(SoSComponent):
                     continue
                 if '__' in pyfile:
                     continue
-                fname, ext = os.path.splitext(pyfile)
+                fname, _ = os.path.splitext(pyfile)
                 modname = f'sos.collector.{modulename}.{fname}'
                 modules.extend(cls._import_modules(modname))
         return modules
@@ -253,7 +256,7 @@ class SoSCollector(SoSComponent):
                   f' {e.__class__.__name__}')
             raise e
         modules = inspect.getmembers(module, inspect.isclass)
-        for mod in modules:
+        for mod in modules.copy():
             if mod[0] in ('SosHost', 'Cluster'):
                 modules.remove(mod)
         return modules
@@ -364,6 +367,14 @@ class SoSCollector(SoSComponent):
                                  dest='become_root',
                                  help='Become root on the remote nodes')
         collect_grp.add_argument('--case-id', help='Specify case number')
+        collect_grp.add_argument('--inherit-config-file', default=False,
+                                 action='store_true',
+                                 help='Use the config file from the collector '
+                                      'for all nodes to use with sos report')
+        collect_grp.add_argument('--node-config-file', type=str,
+                                 default=None,
+                                 help='Path to an existing config file on the '
+                                 'nodes to use with sos report')
         collect_grp.add_argument('--cluster-type',
                                  help='Specify a type of cluster profile')
         collect_grp.add_argument('-c', '--cluster-option',
@@ -426,6 +437,8 @@ class SoSCollector(SoSComponent):
                                  help='Specify a sos preset to use')
         collect_grp.add_argument('--ssh-user',
                                  help='Specify an SSH user. Default root')
+        collect_grp.add_argument('--sudo-binary', default='sudo', type=str,
+                                 help='Privilege escalation binary to use.')
         collect_grp.add_argument('--timeout', type=int, required=False,
                                  help='Timeout for sos report on each node.')
         collect_grp.add_argument('--transport', default='auto', type=str,
@@ -507,6 +520,15 @@ class SoSCollector(SoSComponent):
         cleaner_grp.add_argument('--usernames', dest='usernames', default=[],
                                  action='extend',
                                  help='List of usernames to obfuscate')
+        cleaner_grp.add_argument('--treat-certificates', default='obfuscate',
+                                 choices=['obfuscate', 'keep', 'remove'],
+                                 dest='treat_certificates',
+                                 help=(
+                                    'How to treat the certificate files '
+                                    '[.csr .crt .pem]. Defaults to "obfuscate"'
+                                    ' after convert the file to text. '
+                                    '"Key" certificate files are always '
+                                    'removed.'))
 
     @classmethod
     def display_help(cls, section):
@@ -522,9 +544,9 @@ class SoSCollector(SoSComponent):
         section.add_text(
             'The following help sections may be of further interest:\n'
         )
-        for hsec in hsections:
+        for hsec, value in hsections.items():
             section.add_text(
-                f"{' ':>8}{bold(hsec):<40}{hsections[hsec]:<30}",
+                f"{' ':>8}{bold(hsec):<40}{value:<30}",
                 newline=False
             )
 
@@ -564,7 +586,7 @@ class SoSCollector(SoSComponent):
         """
         self.commons = {
             'cmdlineopts': self.opts,
-            'need_sudo': True if self.opts.ssh_user != 'root' else False,
+            'need_sudo': self.opts.ssh_user != 'root',
             'tmpdir': self.tmpdir,
             'hostlen': max(len(self.opts.primary), len(self.hostname)),
             'policy': self.policy
@@ -596,8 +618,8 @@ class SoSCollector(SoSComponent):
         if self.opts.cluster_options:
             for opt in self.opts.cluster_options:
                 match = False
-                for clust in self.clusters:
-                    for option in self.clusters[clust].options:
+                for clust, value in self.clusters.items():
+                    for option in value.options:
                         if opt.name == option.name and opt.cluster == clust:
                             match = True
                             opt.value = self._validate_option(option, opt)
@@ -619,18 +641,13 @@ class SoSCollector(SoSComponent):
                 msg = "Invalid option type for %s. Expected %s got %s"
                 self.exit(msg % (cli.name, default.opt_type, cli.opt_type), 1)
             return cli.value
-        else:
-            val = cli.value.lower()
-            if val not in ['true', 'on', 'yes', 'false', 'off', 'no']:
-                msg = ("Invalid value for %s. Accepted values are: 'true', "
-                       "'false', 'on', 'off', 'yes', 'no'.")
-                self.exit(msg % cli.name, 1)
-            else:
-                if val in ['true', 'on', 'yes']:
-                    return True
-                else:
-                    return False
-        self.exit(f"Unknown option type: {cli.opt_type}")
+
+        val = cli.value.lower()
+        if val not in ['true', 'on', 'yes', 'false', 'off', 'no']:
+            msg = ("Invalid value for %s. Accepted values are: 'true', "
+                   "'false', 'on', 'off', 'yes', 'no'.")
+            self.exit(msg % cli.name, 1)
+        return val in ['true', 'on', 'yes']
 
     def log_info(self, msg):
         """Log info messages to both console and log file"""
@@ -663,9 +680,9 @@ class SoSCollector(SoSComponent):
             )
 
         _opts = {}
-        for _cluster in self.clusters:
-            for opt in self.clusters[_cluster].options:
-                if opt.name not in _opts.keys():
+        for _, value in self.clusters.items():
+            for opt in value.options:
+                if opt.name not in _opts:
                     _opts[opt.name] = opt
                 else:
                     for clust in opt.cluster:
@@ -719,13 +736,6 @@ class SoSCollector(SoSComponent):
         compr = 'gz'
         return self.tmpdir + '/' + self.arc_name + '.tar.' + compr
 
-    def _fmt_msg(self, msg):
-        width = 80
-        _fmt = ''
-        for line in msg.splitlines():
-            _fmt = _fmt + fill(line, width, replace_whitespace=False) + '\n'
-        return _fmt
-
     def _load_group_config(self):
         """
         Attempts to load the host group specified on the command line.
@@ -753,7 +763,7 @@ class SoSCollector(SoSComponent):
 
         self.log_debug(f"Loading host group {fname}")
 
-        with open(fname, 'r') as hf:
+        with open(fname, 'r', encoding='utf-8') as hf:
             _group = json.load(hf)
             for key in ['primary', 'cluster_type']:
                 if _group[key]:
@@ -776,7 +786,7 @@ class SoSCollector(SoSComponent):
             'name': self.opts.save_group,
             'primary': self.opts.primary,
             'cluster_type': self.cluster.cluster_type[0],
-            'nodes': [n for n in self.node_list]
+            'nodes': list(self.node_list)
         }
         if os.getuid() != 0:
             group_path = os.path.join(Path.home(), '.config/sos/groups.d')
@@ -785,7 +795,7 @@ class SoSCollector(SoSComponent):
         else:
             group_path = COLLECTOR_CONFIG_DIR
         fname = os.path.join(group_path, cfg['name'])
-        with open(fname, 'w') as hf:
+        with open(fname, 'w', encoding='utf-8') as hf:
             json.dump(cfg, hf)
         os.chmod(fname, 0o600)
         return fname
@@ -1072,7 +1082,7 @@ class SoSCollector(SoSComponent):
         # an open session to it.
         if self.primary is not None and not self.cluster.strict_node_list:
             for n in self.node_list:
-                if n == self.primary.hostname or n == self.opts.primary:
+                if n in (self.primary.hostname, self.opts.primary):
                     self.node_list.remove(n)
         self.node_list = list(set(n for n in self.node_list if n))
         self.log_debug(f'Node list reduced to {self.node_list}')
@@ -1165,7 +1175,7 @@ class SoSCollector(SoSComponent):
         """Print the intro message and prompts for a case ID if one is not
         provided on the command line
         """
-        disclaimer = ("""\
+        disclaimer = """\
 This utility is used to collect sos reports from multiple \
 nodes simultaneously. Remote connections are made and/or maintained \
 to those nodes via well-known transport protocols such as SSH.
@@ -1179,7 +1189,7 @@ organization before being passed to any third party.
 
 No configuration changes will be made to the system running \
 this utility or remote systems that it connects to.
-""")
+"""
         self.ui_log.info(f"\nsos collect (version {__version__})\n")
         intro_msg = self._fmt_msg(disclaimer % self.tmpdir)
         self.ui_log.info(intro_msg)
@@ -1200,6 +1210,14 @@ this utility or remote systems that it connects to.
             self.exit()
 
         self.intro()
+
+        if self.opts.batch and self.opts.password:
+            self.exit(
+                "\nsos-collector was called with incompatible options --batch "
+                "and --password.\nIf you need to use --password,"
+                " please omit batch mode.\n",
+                1
+            )
 
         self.configure_sos_cmd()
         self.prep()
@@ -1288,15 +1306,28 @@ this utility or remote systems that it connects to.
         self.log_info(msg % (self.retrieved, self.report_num))
         self.close_all_connections()
         if self.retrieved > 0:
-            arc_name = self.create_cluster_archive()
+            self.arc_name = self.create_cluster_archive()
         else:
             msg = 'No sos reports were collected, nothing to archive...'
             self.exit(msg, 1)
 
-        if (self.opts.upload and self.policy.get_upload_url()) or \
+        if self.opts.upload or \
                 self.opts.upload_s3_endpoint:
             try:
-                self.policy.upload_archive(arc_name)
+                hook_commons = {
+                    'policy': self.policy,
+                    'tmpdir': self.tmpdir,
+                    'sys_tmp': self.sys_tmp,
+                    'options': self.opts,
+                    'manifest': self.manifest
+                }
+                uploader = SoSUpload(parser=self.parser,
+                                     args=self.args,
+                                     cmdline=self.cmdline,
+                                     in_place=True,
+                                     hook_commons=hook_commons,
+                                     archive=self.arc_name)
+                uploader.execute()
                 self.ui_log.info("Uploaded archive successfully")
             except Exception as err:
                 self.ui_log.error(f"Upload attempt failed: {err}")
@@ -1387,19 +1418,16 @@ this utility or remote systems that it connects to.
             if do_clean:
                 _dir = os.path.join(self.tmpdir, self.archive._name)
                 cleaner.obfuscate_file(
-                    os.path.join(_dir, 'sos_logs', 'sos.log'),
-                    short_name='sos.log'
+                        os.path.join(_dir, 'sos_logs', 'sos.log')
                 )
                 cleaner.obfuscate_file(
-                    os.path.join(_dir, 'sos_logs', 'ui.log'),
-                    short_name='ui.log'
+                    os.path.join(_dir, 'sos_logs', 'ui.log')
                 )
                 cleaner.obfuscate_file(
-                    os.path.join(_dir, 'sos_reports', 'manifest.json'),
-                    short_name='manifest.json'
+                    os.path.join(_dir, 'sos_reports', 'manifest.json')
                 )
 
-            arc_name = self.archive.finalize(self.opts.compression_type)
+            arc_name = self.archive.finalize(method=None)
             final_name = os.path.join(self.sys_tmp, os.path.basename(arc_name))
             if do_clean:
                 final_name = cleaner.obfuscate_string(
@@ -1427,3 +1455,5 @@ this utility or remote systems that it connects to.
             msg = (f"Could not finalize archive: {err}\n\nData may still be "
                    f"available uncompressed at {self.archive_path}")
             self.exit(msg, 2)
+            # Never gets here. This is to fix "inconsistent-return-statements
+            return "Archive error"

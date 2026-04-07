@@ -8,6 +8,7 @@
 #
 # See the LICENSE file in the source distribution for further information.
 
+import re
 from sos.cleaner.parsers import SoSCleanerParser
 from sos.cleaner.mappings.ipv6_map import SoSIPv6Map
 
@@ -17,7 +18,7 @@ class SoSIPv6Parser(SoSCleanerParser):
 
     name = 'IPv6 Parser'
     map_file_key = 'ipv6_map'
-    regex_patterns = [
+    regex_pattern = re.compile(
         # Attention: note that this is a single long regex, not several entries
         # This is initially based off of two regexes from the Java library
         # for validating an IPv6 string. However, this is modified to begin and
@@ -27,16 +28,16 @@ class SoSIPv6Parser(SoSCleanerParser):
         # a trailing prefix for the network bits.
         r"(?<![:\\.\\-a-z0-9])((([0-9a-f]{1,4})(:[0-9a-f]{1,4}){7})|"
         r"(([0-9a-f]{1,4}(:[0-9a-f]{0,4}){0,5}))([^.])::(([0-9a-f]{1,4}"
-        r"(:[0-9a-f]{1,4}){0,5})?))(/\d{1,3})?(?![:\\a-z0-9])"
-    ]
+        r"(:[0-9a-f]{1,4}){0,5})?)(\/\d{1,3})?)(?!([a-z0-9]|:[a-z0-9]))"
+    )
     parser_skip_files = [
         'etc/dnsmasq.conf.*',
         '.*modinfo.*',
     ]
     compile_regexes = False
 
-    def __init__(self, config, skip_cleaning_files=[]):
-        self.mapping = SoSIPv6Map()
+    def __init__(self, config, workdir, skip_cleaning_files=[]):
+        self.mapping = SoSIPv6Map(workdir)
         super().__init__(config, skip_cleaning_files)
 
     def get_map_contents(self):
@@ -47,8 +48,7 @@ class SoSIPv6Parser(SoSCleanerParser):
             'version': self.mapping.version,
             'networks': {}
         }
-        for net in self.mapping.networks:
-            _net = self.mapping.networks[net]
+        for _, _net in self.mapping.networks.items():
             _d['networks'][_net.original_address] = {
                 'obfuscated': _net.obfuscated_address,
                 'hosts': {}

@@ -38,13 +38,6 @@ class CRIO(Plugin, RedHatPlugin, UbuntuPlugin, CosPlugin):
             "/etc/sysconfig/crio-*"
         ])
 
-        self.add_env_var([
-            'HTTP_PROXY',
-            'HTTPS_PROXY',
-            'NO_PROXY',
-            'ALL_PROXY'
-        ])
-
         self.add_cmd_output([
             "crio config"
         ])
@@ -61,7 +54,7 @@ class CRIO(Plugin, RedHatPlugin, UbuntuPlugin, CosPlugin):
             'pods',
             'ps',
             'ps -a',
-            'ps -v',
+            'ps -va',
             'stats',
             'version',
         ]
@@ -107,12 +100,18 @@ class CRIO(Plugin, RedHatPlugin, UbuntuPlugin, CosPlugin):
         return ret
 
     def _get_crio_goroutine_stacks(self):
-        result = self.exec_cmd("pidof crio")
-        if result['status'] != 0:
-            return
-        pid = result['output'].strip()
-        result = self.exec_cmd("kill -USR1 " + pid)
-        if result['status'] == 0:
+        if self.signal_process_usr1(r'^/usr/bin/crio$'):
             self.add_copy_spec("/tmp/crio-goroutine-stacks*.log")
+
+    def postproc(self):
+
+        # Scrub proxy details in config file
+        # Example of scrubbing:
+        #
+        #   http_proxy=http://USER:PASSWORD@X.X.X.X:8080
+        # To:
+        #   http_proxy=http://******:******@X.X.X.X:8080
+        #
+        self.do_paths_http_sub("/etc/containers/containers.conf")
 
 # vim: set et ts=4 sw=4 :

@@ -51,6 +51,8 @@ class RedHatInsights(Plugin, RedHatPlugin):
             "insights-client --test-connection --net-debug",
             timeout=30
         )
+        self.add_cmd_output("insights-client --version")
+        self.add_cmd_output("insights-client --status", timeout=30)
 
         self.add_dir_listing(["/etc/rhsm", "/sys/kernel", "/var/lib/sss"],
                              recursive=True)
@@ -64,5 +66,6 @@ class RedHatInsights(Plugin, RedHatPlugin):
             self.do_file_sub(
                 conf, r'(proxy[\t\ ]*=.*)(:)(.*)(@.*)', r'\1\2********\4'
             )
+        self.do_paths_http_sub(["/var/log/insights-client/*"])
 
 # vim: set et ts=4 sw=4 :

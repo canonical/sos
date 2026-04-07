@@ -33,8 +33,8 @@ class OpenStackDesignate(Plugin):
             "/etc/designate/*",
             self.var_puppet_gen + "/etc/designate/designate.conf",
             self.var_puppet_gen + "/etc/designate/pools.yaml",
-            self.var_ansible_gen + "/designate/etc/designate/named.conf",
-            self.var_ansible_gen + "/designate/etc/designate/named/*",
+            self.var_ansible_gen + "/designate/etc/named.conf",
+            self.var_ansible_gen + "/designate/etc/named/*",
             self.var_ansible_gen + "/unbound/*"
         ])
 
@@ -85,9 +85,11 @@ class OpenStackDesignate(Plugin):
 
     def postproc(self):
         protect_keys = [
-            "password", "connection", "transport_url", "admin_password",
-            "ssl_key_password", "ssl_client_key_password",
-            "memcache_secret_key"
+            ".*_key",
+            ".*_pass(wd|word)?",
+            "password",
+            "connection",
+            "transport_url",
         ]
         regexp = fr"(^\s*({'|'.join(protect_keys)})\s*=\s*)(.*)"
 

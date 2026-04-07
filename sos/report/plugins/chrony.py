@@ -25,9 +25,20 @@ class Chrony(Plugin):
             "chronyc sourcestats",
             "chronyc serverstats",
             "chronyc ntpdata",
-            "chronyc -n clients"
+            "chronyc -n clients",
+            "chronyc -N authdata",
+            "chronyc -n selectdata",
         ])
         self.add_cmd_output("chronyc -n sources", tags="chronyc_sources")
+
+        if self.get_option("all_logs"):
+            self.add_copy_spec([
+                    "/var/log/chrony/*",
+            ])
+        else:
+            self.add_copy_spec([
+                    "/var/log/chrony/*.log",
+            ])
 
 
 class RedHatChrony(Chrony, RedHatPlugin):

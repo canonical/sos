@@ -15,7 +15,9 @@ try:
 except ImportError:
     REQUESTS_LOADED = False
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+from sos.utilities import TIMEOUT_DEFAULT
 
 DEVICE_AUTH_CLIENT_ID = "sos-tools"
 GRANT_TYPE_DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code"
@@ -67,7 +69,8 @@ class DeviceAuthorizationClass:
             res = requests.post(
                 self.client_identifier_url,
                 data=data,
-                headers=headers)
+                headers=headers,
+                timeout=TIMEOUT_DEFAULT)
             res.raise_for_status()
             response = res.json()
             self._user_code = response.get("user_code")
@@ -99,7 +102,8 @@ class DeviceAuthorizationClass:
             time.sleep(self._interval)
             try:
                 check_auth_completion = requests.post(self.token_endpoint,
-                                                      data=token_data)
+                                                      data=token_data,
+                                                      timeout=TIMEOUT_DEFAULT)
 
                 status_code = check_auth_completion.status_code
 
@@ -124,14 +128,14 @@ class DeviceAuthorizationClass:
         and their expiry etc.
         """
         self._access_token = token_data.get("access_token")
-        self._access_expires_at = datetime.utcnow() + \
+        self._access_expires_at = datetime.now(timezone.utc) + \
             timedelta(seconds=token_data.get("expires_in"))
         self._refresh_token = token_data.get("refresh_token")
         self._refresh_expires_in = token_data.get("refresh_expires_in")
         if self._refresh_expires_in == 0:
             self._refresh_expires_at = datetime.max
         else:
-            self._refresh_expires_at = datetime.utcnow() + \
+            self._refresh_expires_at = datetime.now(timezone.utc) + \
                 timedelta(seconds=self._refresh_expires_in)
 
     def get_access_token(self):
@@ -142,13 +146,11 @@ class DeviceAuthorizationClass:
         """
         if self.is_access_token_valid():
             return self._access_token
-        else:
-            if self.is_refresh_token_valid():
-                self._use_refresh_token_grant()
-                return self._access_token
-            else:
-                self._use_device_code_grant()
-                return self._access_token
+        if self.is_refresh_token_valid():
+            self._use_refresh_token_grant()
+            return self._access_token
+        self._use_device_code_grant()
+        return self._access_token
 
     def is_access_token_valid(self):
         """
@@ -159,7 +161,7 @@ class DeviceAuthorizationClass:
         """
         return self._access_token and self._access_expires_at and \
             self._access_expires_at - timedelta(seconds=180) > \
-            datetime.utcnow()
+            datetime.now(timezone.utc)
 
     def is_refresh_token_valid(self):
         """
@@ -171,7 +173,7 @@ class DeviceAuthorizationClass:
         """
         return self._refresh_token and self._refresh_expires_at and \
             self._refresh_expires_at - timedelta(seconds=180) > \
-            datetime.utcnow()
+            datetime.now(timezone.utc)
 
     def _use_refresh_token_grant(self, refresh_token=None):
         """
@@ -189,7 +191,8 @@ class DeviceAuthorizationClass:
                               refresh_token else refresh_token}
 
         refresh_token_res = requests.post(self.token_endpoint,
-                                          data=refresh_token_data)
+                                          data=refresh_token_data,
+                                          timeout=TIMEOUT_DEFAULT)
 
         if refresh_token_res.status_code == 200:
             self._set_token_data(refresh_token_res.json())

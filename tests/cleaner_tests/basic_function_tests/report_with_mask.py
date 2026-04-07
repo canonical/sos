@@ -6,10 +6,10 @@
 #
 # See the LICENSE file in the source distribution for further information.
 
-from sos_tests import StageOneReportTest, StageTwoReportTest
-
-import re
 from os import stat
+import re
+
+from sos_tests import StageOneReportTest, StageTwoReportTest
 
 
 class ReportWithMask(StageOneReportTest):
@@ -25,8 +25,8 @@ class ReportWithMask(StageOneReportTest):
         # obfuscate a random word from /etc/hosts and ensure the updated
         # sanitised file has same permissions (a+r)
         try:
-            self.hosts_obfuscated = open(
-                '/etc/hosts').read().strip('#\n').split()[-1]
+            with open('/etc/hosts', encoding='utf-8') as fp:
+                self.obsfuncated = fp.read().strip('#\n').split()[-1]
         except (FileNotFoundError, IndexError) as e:
             self.warning(f"Unable to process /etc/hosts: {e}")
         if self.hosts_obfuscated:

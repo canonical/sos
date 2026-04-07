@@ -17,13 +17,26 @@ class SunbeamHypervisor(Plugin, UbuntuPlugin):
     profiles = ('cloud',)
     packages = ('openstack-hypervisor',)
 
+    plugin_timeout = 600
+
+    services = (
+        'snap.openstack-hypervisor.ceilometer-compute-agent',
+        'snap.openstack-hypervisor.libvirt-exporter',
+        'snap.openstack-hypervisor.libvirtd',
+        'snap.openstack-hypervisor.masakari-instancemonitor',
+        'snap.openstack-hypervisor.neutron-ovn-metadata-agent',
+        'snap.openstack-hypervisor.nova-api-metadata',
+        'snap.openstack-hypervisor.nova-compute',
+        'snap.openstack-hypervisor.ovn-controller',
+        'snap.openstack-hypervisor.ovs-exporter',
+        'snap.openstack-hypervisor.ovs-vswitchd',
+        'snap.openstack-hypervisor.ovsdb-server',
+        'snap.openstack-hypervisor.virtlogd',
+    )
+
     common_dir = '/var/snap/openstack-hypervisor/common'
 
     def setup(self):
-
-        self.add_service_status('snap.openstack-hypervisor.*')
-
-        self.add_journal('nova-compute')
 
         self.add_copy_spec([
             f'{self.common_dir}/*.log',
@@ -39,6 +52,7 @@ class SunbeamHypervisor(Plugin, UbuntuPlugin):
             f'{self.common_dir}/etc/libvirt/passwd.db',
             f'{self.common_dir}/etc/libvirt/krb5.tab',
             f'{self.common_dir}/var/log/ovn/',
+            f'{self.common_dir}/etc/pki/',
         ])
 
     def postproc(self):
@@ -65,16 +79,42 @@ class SunbeamHypervisor(Plugin, UbuntuPlugin):
         ]
         connection_keys = ["connection", "sql_connection"]
 
+        openstack_folders = [
+            "nova",
+            "neutron",
+            "ceilometer",
+            "masakarimonitors",
+        ]
+
         self.do_path_regex_sub(
-            fr"{self.common_dir}/etc/(nova|neutron)/*",
+            fr'{self.common_dir}/etc/({"|".join(openstack_folders)})/*',
             fr'(^\s*({"|".join(protect_keys)})\s*=\s*)(.*)',
             r"\1*********"
         )
         self.do_path_regex_sub(
-            fr"{self.common_dir}/etc/(nova|neutron)/*",
+            fr'{self.common_dir}/etc/({"|".join(openstack_folders)})/*',
             fr'(^\s*({"|".join(connection_keys)})\s*=\s*(.*)'
             r'://(\w*):)(.*)(@(.*))',
             r"\1*********\6"
+        )
+
+        # hooks.log
+        protect_hook_keys = [
+            "password",
+            "ovn_metadata_proxy_shared_secret",
+            "cacert",
+            "cert",
+            "key",
+            "ovn_cacert",
+            "ovn_cert",
+            "ovn_key",
+            "url",
+        ]
+
+        self.do_file_sub(
+            f'{self.common_dir}/hooks.log',
+            fr'(\'({"|".join(protect_hook_keys)})\'):\s?\'(.+?)\'',
+            r"\1: **********"
         )
 
 # vim: et ts=4 sw=4

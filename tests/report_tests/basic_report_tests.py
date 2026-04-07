@@ -26,7 +26,7 @@ class NormalSoSReport(StageOneReportTest):
         self.assertOutputNotContains(r'\[archive:.*\]')
 
     def test_postproc_called(self):
-        self.assertSosLogContains('substituting scrpath')
+        self.assertSosLogContains('substituting srcpath')
 
     def test_label_applied_to_archive(self):
         self.assertTrue('thisismylabel' in self.archive)
@@ -48,9 +48,9 @@ class NormalSoSReport(StageOneReportTest):
         )
 
     def test_dir_listing_works(self):
-        self.assertFileCollected('sos_commands/boot/ls_-alhZR_.boot')
-        boot_ls = self.get_name_in_archive('sos_commands/boot/ls_-alhZR_.boot')
-        with open(boot_ls, 'r') as ls_file:
+        self.assertFileCollected('sos_commands/boot/ls_-alZR_.boot')
+        boot_ls = self.get_name_in_archive('sos_commands/boot/ls_-alZR_.boot')
+        with open(boot_ls, 'r', encoding='utf-8') as ls_file:
             # make sure we actually got ls output
             ln = ls_file.readline().strip()
             self.assertEqual(

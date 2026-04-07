@@ -45,7 +45,8 @@ class Boot(Plugin, IndependentPlugin):
         self.add_cmd_output([
             "efibootmgr -v",
             "lsinitramfs -l /initrd.img",
-            "lsinitramfs -l /boot/initrd.img"
+            "lsinitramfs -l /boot/initrd.img",
+            "grubby --default-kernel"
         ])
 
         if self.get_option("all-images"):
@@ -55,5 +56,7 @@ class Boot(Plugin, IndependentPlugin):
                 self.add_cmd_output(f"lsinitrd {image}", priority=100)
                 self.add_cmd_output(f"lsinitramfs -l {image}", priority=100)
 
+        # Capture Open Virtual Machine Firmware information
+        self.add_copy_spec("/sys/firmware/efi/ovmf_debug_log")
 
 # vim: set et ts=4 sw=4 :

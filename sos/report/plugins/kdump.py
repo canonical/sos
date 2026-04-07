@@ -7,8 +7,8 @@
 # See the LICENSE file in the source distribution for further information.
 
 import platform
-from sos.report.plugins import Plugin, PluginOpt, RedHatPlugin, DebianPlugin, \
-    UbuntuPlugin, CosPlugin, AzurePlugin
+from sos.report.plugins import (Plugin, PluginOpt, RedHatPlugin, DebianPlugin,
+                                UbuntuPlugin, CosPlugin, AzurePlugin)
 
 
 class KDump(Plugin):
@@ -25,11 +25,10 @@ class KDump(Plugin):
             "/proc/sys/kernel/panic",
             "/proc/sys/kernel/panic_on_oops",
             "/sys/kernel/kexec_loaded",
+            "/sys/kernel/kexec",
+            "/sys/kernel/fadump",
             "/sys/kernel/fadump_enabled",
-            "/sys/kernel/fadump/enabled",
             "/sys/kernel/fadump_registered",
-            "/sys/kernel/fadump/registered",
-            "/sys/kernel/fadump/mem_reserved",
             "/sys/kernel/kexec_crash_size"
         ])
 
@@ -84,7 +83,8 @@ class RedHatKDump(KDump, RedHatPlugin):
             "/etc/udev/rules.d/*kexec.rules",
             "/usr/lib/udev/rules.d/*kexec.rules",
             "/var/crash/*/kexec-dmesg.log",
-            "/var/log/kdump.log"
+            "/var/log/kdump.log",
+            "/var/crash/*/vmcore-creation.status",
         ])
         self.add_copy_spec("/var/crash/*/vmcore-dmesg.txt",
                            tags="vmcore_dmesg")
@@ -97,16 +97,41 @@ class RedHatKDump(KDump, RedHatPlugin):
         self.add_dir_listing(path, recursive=True)
         self.add_copy_spec(f"{path}/*/vmcore-dmesg.txt")
         self.add_copy_spec(f"{path}/*/kexec-dmesg.log")
+        self.add_copy_spec(f"{path}/*/vmcore-creation.status")
 
         # collect the latest vmcore created in the last 24hrs <= 2GB
         if self.get_option("get-vm-core"):
             self.add_copy_spec(f"{path}/*/vmcore", sizelimit=2048, maxage=24)
+
+        # collect status via kdumpctl
+        self.add_cmd_output([
+            "kdumpctl status",
+            "kdumpctl estimate",
+        ])
 
 
 class DebianKDump(KDump, DebianPlugin, UbuntuPlugin):
 
     files = ('/etc/default/kdump-tools',)
     packages = ('kdump-tools',)
+
+    option_list = [
+        PluginOpt("get-vm-core", default=False, val_type=bool,
+                  desc="collect memory dumps")
+    ]
+
+    def read_kdump_conffile(self):
+        """ Parse /etc/default/kdump-tools """
+        path = "/var/crash"
+
+        kdump = '/etc/default/kdump-tools'
+        with open(kdump, 'r', encoding='UTF-8') as file:
+            for line in file:
+                line = line.strip()
+                if line.startswith("KDUMP_COREDIR"):
+                    path = line.split('=')[1].strip('"')
+
+        return path
 
     def setup(self):
         super().setup()
@@ -120,6 +145,24 @@ class DebianKDump(KDump, DebianPlugin, UbuntuPlugin):
         self.add_copy_spec([
             "/etc/default/kdump-tools"
         ])
+
+        try:
+            path = self.read_kdump_conffile()
+        except Exception:  # pylint: disable=broad-except
+            # set default path of coredir
+            path = "/var/crash"
+
+        self.add_dir_listing(path, recursive=True)
+        self.add_copy_spec([
+            f"{path}/kexec_cmd",
+            f"{path}/kdump_lock",
+            f"{path}/*/dmesg*",
+        ])
+        self.add_copy_spec(f"{path}/linux-image-*", sizelimit=2048, maxage=24)
+
+        # collect the latest dump created in the last 24hrs <= 2GB
+        if self.get_option("get-vm-core"):
+            self.add_copy_spec(f"{path}/*/dump*", sizelimit=2048, maxage=24)
 
 
 class CosKDump(KDump, CosPlugin):
@@ -175,6 +218,7 @@ class AzureKDump(KDump, AzurePlugin):
         self.add_dir_listing(path, recursive=True)
         self.add_copy_spec(f"{path}/*/vmcore-dmesg.txt")
         self.add_copy_spec(f"{path}/*/kexec-dmesg.log")
+        self.add_copy_spec(f"{path}/*/vmcore-creation.status")
 
         # collect the latest vmcore created in the last 24hrs <= 2GB
         if self.get_option("get-vm-core"):

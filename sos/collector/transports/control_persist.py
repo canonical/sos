@@ -61,12 +61,12 @@ class SSHControlPersist(RemoteTransport):
             True if ControlPersist is supported, else raise Exception.
         """
         ssh_cmd = ['ssh', '-o', 'ControlPersist']
-        cmd = subprocess.Popen(ssh_cmd, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-        out, err = cmd.communicate()
-        err = err.decode('utf-8')
-        if 'Bad configuration option' in err or 'Usage:' in err:
-            raise ControlPersistUnsupportedException
+        with subprocess.Popen(ssh_cmd, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE) as cmd:
+            _, err = cmd.communicate()
+            err = err.decode('utf-8')
+            if 'Bad configuration option' in err or 'Usage:' in err:
+                raise ControlPersistUnsupportedException
         return True
 
     def _connect(self, password=''):  # pylint: disable=too-many-branches
@@ -95,7 +95,7 @@ class SSHControlPersist(RemoteTransport):
                            "Please update your OpenSSH installation.")
             raise
         self.log_info('Opening SSH session to create control socket')
-        self.control_path = (f"{self.tmpdir}/.sos-collector-{self.address}")
+        self.control_path = f"{self.tmpdir}/.sos-collector-{self.address}"
         self.ssh_cmd = ''
         connected = False
         ssh_key = ''
@@ -112,11 +112,11 @@ class SSHControlPersist(RemoteTransport):
         res = pexpect.spawn(cmd, encoding='utf-8')
 
         connect_expects = [
-            u'Connected',
-            u'password:',
-            u'.*Permission denied.*',
-            u'.* port .*: No route to host',
-            u'.*Could not resolve hostname.*',
+            'Connected',
+            'password:',
+            '.*Permission denied.*',
+            '.* port .*: No route to host',
+            '.*Could not resolve hostname.*',
             pexpect.TIMEOUT
         ]
 
@@ -127,8 +127,8 @@ class SSHControlPersist(RemoteTransport):
         elif index == 1:
             if password:
                 pass_expects = [
-                    u'Connected',
-                    u'Permission denied, please try again.',
+                    'Connected',
+                    'Permission denied, please try again.',
                     pexpect.TIMEOUT
                 ]
                 res.sendline(password)
@@ -192,6 +192,12 @@ class SSHControlPersist(RemoteTransport):
             self.ssh_cmd = (f"ssh -oControlPath={self.control_path} "
                             f"{self.opts.ssh_user}@{self.address}")
         return self.ssh_cmd
+
+    def _copy_file_to_remote(self, fname, dest):
+        cmd = (f"/usr/bin/scp -oControlPath={self.control_path} "
+               f"{fname} {self.opts.ssh_user}@{self.address}:{dest}")
+        res = sos_get_command_output(cmd, timeout=10)
+        return res['status'] == 0
 
     def _retrieve_file(self, fname, dest):
         cmd = (f"/usr/bin/scp -oControlPath={self.control_path} "

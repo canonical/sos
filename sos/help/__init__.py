@@ -100,7 +100,8 @@ class SoSHelper(SoSComponent):
             'collector': 'SoSCollector',
             'collector.transports': 'RemoteTransport',
             'collector.clusters': 'Cluster',
-            'policies': 'Policy'
+            'policies': 'Policy',
+            'upload': 'SoSUpload'
         }
 
         cls = None
@@ -115,9 +116,9 @@ class SoSHelper(SoSComponent):
                 'collector.transports.': self._get_collect_transport,
                 'collector.clusters.': self._get_collect_cluster,
             }
-            for _sec in _help:
+            for _sec, value in _help.items():
                 if self.opts.topic.startswith(_sec):
-                    cls = _help[_sec]()
+                    cls = value()
                     break
         return cls
 
@@ -206,14 +207,12 @@ class SoSHelper(SoSComponent):
             'report.plugins.$plugin': 'Information on a specific $plugin',
             'clean':    'Detailed help on the clean command',
             'collect':  'Detailed help on the collect command',
-            'policies': 'How sos operates on different distributions'
+            'upload': 'Detailed help on the upload command',
+            'policies': 'How sos operates on different distributions',
         }
 
-        for sect in sections:
-            avail_help.add_text(
-                f"\t{bold(sect):<36}{sections[sect]}",
-                newline=False
-            )
+        for sect, value in sections.items():
+            avail_help.add_text(f"\t{bold(sect):<36}{value}", newline=False)
 
         self_help.display()
 

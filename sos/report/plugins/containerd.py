@@ -6,15 +6,18 @@
 #
 # See the LICENSE file in the source distribution for further information.
 
-from sos.report.plugins import (Plugin, RedHatPlugin, UbuntuPlugin, CosPlugin)
+from sos.report.plugins import Plugin, IndependentPlugin, PluginOpt
 
 
-class Containerd(Plugin, RedHatPlugin, UbuntuPlugin, CosPlugin):
+class Containerd(Plugin, IndependentPlugin):
 
     short_desc = 'Containerd containers'
     plugin_name = 'containerd'
     profiles = ('container',)
     packages = ('containerd', 'containerd.io',)
+    option_list = [
+        PluginOpt('stackdump', False, desc='collect containerd stack dump(s)')
+    ]
 
     def setup(self):
         self.add_copy_spec([
@@ -23,8 +26,20 @@ class Containerd(Plugin, RedHatPlugin, UbuntuPlugin, CosPlugin):
         ])
 
         self.add_cmd_output('containerd config dump')
+        self.add_cmd_output('ctr deprecations list')
+
+        pre_cmd = 'ctr -n k8s.io'
+
+        self.add_cmd_output([
+            f'{pre_cmd} image ls',
+            f'{pre_cmd} container ls',
+        ])
 
         # collect the containerd logs.
         self.add_journal(units='containerd')
+
+        if self.get_option('stackdump'):
+            for pid in self.signal_process_usr1(r'^/usr/bin/containerd$'):
+                self.add_copy_spec(f"/tmp/containerd.{pid}.stacks.log")
 
 # vim: set et ts=4 sw=4 :

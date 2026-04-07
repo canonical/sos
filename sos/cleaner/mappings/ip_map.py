@@ -9,7 +9,6 @@
 # See the LICENSE file in the source distribution for further information.
 
 import ipaddress
-import random
 
 from sos.cleaner.mappings import SoSMap
 
@@ -42,9 +41,27 @@ class SoSIPMap(SoSMap):
     ]
 
     _networks = {}
+    obfuscated_ips = set()
     network_first_octet = 100
     skip_network_octets = ['127', '169', '172', '192']
     compile_regexes = False
+    # counter for obfuscating a single IP address; the value stands for
+    # 172.17.0.0; we use a private block of IP addresses and ignore
+    # 172.16.0.0/16 block as those addresses are more often used in real
+    # (an attempt to prevent confusion)
+    _saddr_cnt = 2886795264
+
+    def conf_update(self, config):
+        """Override the base conf_update() so that we can add items into
+        obfuscated_ips.
+        """
+        for value in config.values():
+            self.obfuscated_ips.add(value.split('/', maxsplit=1)[0])
+        super().conf_update(config)
+
+    def insert_to_dataset(self, item, value):
+        self.obfuscated_ips.add(value.split('/', maxsplit=1)[0])
+        self.dataset[item] = value
 
     def ip_in_dataset(self, ipaddr):
         """There are multiple ways in which an ip address could be handed to us
@@ -53,35 +70,33 @@ class SoSIPMap(SoSMap):
         Here, match the ip address to any of the obfuscated addresses we've
         already created
         """
-        for _ip in self.dataset.values():
-            if str(ipaddr).split('/')[0] == _ip.split('/')[0]:
-                return True
-        return False
+        addr_str = str(ipaddr).split('/', maxsplit=1)[0]
+        return addr_str in self.obfuscated_ips
 
-    def get(self, ipaddr):
+    def get(self, item):
         """Ensure that when requesting an obfuscated address, we return a str
         object instead of an IPv(4|6)Address object
         """
         filt_start = ('/', '=', ']', ')')
-        if ipaddr.startswith(filt_start):
-            ipaddr = ipaddr.lstrip(''.join(filt_start))
+        if item.startswith(filt_start):
+            item = item.lstrip(''.join(filt_start))
 
-        if ipaddr in self.dataset.keys():
-            return self.dataset[ipaddr]
+        if item in self.dataset:
+            return self.dataset[item]
 
-        if self.ignore_item(ipaddr) or self.ip_in_dataset(ipaddr):
-            return ipaddr
+        if self.ignore_item(item) or self.ip_in_dataset(item):
+            return item
 
         # it's not in there, but let's make sure we haven't previously added
         # an address with a CIDR notation and we're now looking for it without
         # that notation
-        if '/' not in ipaddr:
-            for key in self.dataset.keys():
-                if key.startswith(ipaddr):
-                    return self.dataset[key].split('/')[0]
+        if '/' not in item:
+            for key, value in self.dataset.items():
+                if key.startswith(item):
+                    return value.split('/')[0]
 
         # fallback to the default map behavior of adding it fresh
-        return self.add(ipaddr)
+        return self.add(item)
 
     def set_ip_cidr_from_existing_subnet(self, addr):
         """Determine if a given address is in a subnet of an already obfuscated
@@ -162,13 +177,14 @@ class SoSIPMap(SoSMap):
         return self._new_obfuscated_single_address()
 
     def _new_obfuscated_single_address(self):
-        def _gen_address():
-            _octets = []
-            for i in range(0, 4):
-                _octets.append(random.randint(11, 99))
-            return f"{_octets[0]}.{_octets[1]}.{_octets[2]}.{_octets[3]}"
-
-        _addr = _gen_address()
+        # increment the counter and ignore *.0 and *.255 addresses
+        self._saddr_cnt += 1
+        while self._saddr_cnt % 256 in (0, 255):
+            self._saddr_cnt += 1
+        # split the counter value to four octets (i.e. % 256) to get an
+        # obfuscated IP address
+        _addr = f"{self._saddr_cnt >> 24}.{(self._saddr_cnt >> 16) % 256}." \
+            f"{(self._saddr_cnt >> 8) % 256}.{self._saddr_cnt % 256}"
         if _addr in self.dataset.values():
             return self._new_obfuscated_single_address()
         return _addr
@@ -197,5 +213,7 @@ class SoSIPMap(SoSMap):
             pass
 
         if _obf_network:
+            _obf_network_s = str(_obf_network)
             self._networks[network] = _obf_network
-            self.dataset[str(network)] = str(_obf_network)
+            self.dataset[str(network)] = _obf_network_s
+            self.obfuscated_ips.add(_obf_network_s.split('/', maxsplit=1)[0])

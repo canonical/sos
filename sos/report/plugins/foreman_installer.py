@@ -26,6 +26,7 @@ class ForemanInstaller(Plugin, DebianPlugin, UbuntuPlugin):
             "/var/log/foreman-installer/*",
             "/var/log/foreman-maintain/*",
             "/var/lib/foreman-maintain/data.yml",
+            "/var/lib/foreman-maintain/satellite_metrics.yml",
             "/etc/foreman-maintain/foreman_maintain.yml",
             # specifically collect .applied files
             # that would be skipped otherwise as hidden files
@@ -56,8 +57,8 @@ class ForemanInstaller(Plugin, DebianPlugin, UbuntuPlugin):
         # also hide passwords in yet different formats
         self.do_path_regex_sub(
             install_logs,
-            r"((\.|_|-)password(=\'|=|\", \"))(\w*)",
-            r"\1********")
+            r"password(\", \"|=|\" value: \"|\": \")(.*?)(\", \".*|\"]]|\"|$)",
+            r"password\1********\3")
         self.do_path_regex_sub(
             "/var/log/foreman-installer/foreman-proxy*",
             r"(\s*proxy_password\s=) (.*)",

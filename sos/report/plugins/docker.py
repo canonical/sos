@@ -35,10 +35,6 @@ class Docker(Plugin, CosPlugin):
         ])
 
         self.add_env_var([
-            'HTTP_PROXY',
-            'HTTPS_PROXY',
-            'NO_PROXY',
-            'ALL_PROXY',
             'DOCKER_BUILD_PROXY',
             'DOCKER_RUN_PROXY'
         ])
@@ -97,6 +93,11 @@ class Docker(Plugin, CosPlugin):
             insp = name if 'none' not in name else img_id
             self.add_cmd_output(f"docker inspect {insp}", subdir='images',
                                 tags="docker_image_inspect")
+            self.add_cmd_output(
+                f"docker image history {insp}",
+                subdir='images/history',
+                tags='docker_image_tree'
+            )
 
         for vol in volumes:
             self.add_cmd_output(f"docker volume inspect {vol}",
@@ -132,6 +133,18 @@ class RedHatDocker(Docker, RedHatPlugin):
             "/etc/udev/rules.d/80-docker.rules",
             "/etc/containers/"
         ])
+
+    def postproc(self):
+        super().postproc()
+
+        # Scrub proxy details in config file
+        # Example of scrubbing:
+        #
+        #   http_proxy=http://USER:PASSWORD@X.X.X.X:8080
+        # To:
+        #   http_proxy=http://******:******@X.X.X.X:8080
+        #
+        self.do_paths_http_sub("/etc/containers/containers.conf")
 
 
 class UbuntuDocker(Docker, UbuntuPlugin, DebianPlugin):

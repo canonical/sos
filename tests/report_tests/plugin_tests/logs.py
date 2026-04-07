@@ -41,7 +41,7 @@ class JournalSizeLimitTest(StageTwoReportTest):
     :avocado: tags=stagetwo
     """
 
-    sos_cmd = '-o logs --journal-size=20 --log-size=10'
+    sos_cmd = '-o logs --journal-size=10 --log-size=5'
     sos_timeout = 500
     packages = {
         'rhel': ['python3-systemd'],
@@ -54,14 +54,14 @@ class JournalSizeLimitTest(StageTwoReportTest):
         from systemd import journal  # pylint: disable=import-error
         _reader = journal.Reader()
         _size = _reader.get_usage() / 1024 / 1024
-        if _size > 20:
+        if _size > 30:
             return
         # write 20MB at a time to side-step rate/size limiting on some distros
         # write over 20MB to ensure we will actually size limit inside sos,
         # allowing for any compression or de-dupe systemd does
         sosfd = journal.stream('sos-testing')
         rsize = 10 * 1048576
-        for i in range(2):
+        for _ in range(2):
             # generate 10MB, write it, then write it in reverse.
             # Spend less time generating new strings
             rand = ''.join(

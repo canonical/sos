@@ -90,8 +90,7 @@ class OVNCentral(Plugin):
         """ Collect OVN database output """
         if tables:
             return [f"{ovn_cmd} list {table}" for table in tables]
-        else:
-            return None
+        return None
 
     def setup(self):
         # check if env is a clustered or non-clustered one
@@ -163,6 +162,7 @@ class OVNCentral(Plugin):
             f"{pfx}ovn-sbctl {nolo} lflow-list",
             f"{pfx}ovn-sbctl {nolo} get-ssl",
             f"{pfx}ovn-sbctl {nolo} get-connection",
+            f"{pfx}ovn-sbctl {nolo} --columns=_uuid list MAC_Binding",
         ]
 
         self.add_cmd_output(sbctl_cmds, foreground=True,
@@ -193,7 +193,16 @@ class OVNCentral(Plugin):
             cmds, foreground=True, container=self.container_name
         )
 
+        # Collect Certificate Validity Dates
+        for path in ['/etc/ovn/ovn-central.crt', '/etc/ovn/cert_host']:
+            if self.path_exists(path):
+                self.add_cmd_output(
+                   f"openssl x509 -in {path} -noout -dates"
+                )
+
         self.add_copy_spec("/etc/sysconfig/ovn-northd")
+        # Collect Northd DB Parameters
+        self.add_copy_spec('/etc/ovn/ovn-northd-db-params.conf')
 
         ovs_dbdir = os.environ.get('OVS_DBDIR')
         for dbfile in ["ovnnb_db.db", "ovnsb_db.db"]:

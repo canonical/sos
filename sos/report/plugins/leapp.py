@@ -16,10 +16,15 @@ class Leapp(Plugin, RedHatPlugin):
     short_desc = 'Leapp upgrade handling tool'
 
     plugin_name = 'leapp'
-    packages = ('leapp', 'leapp-repository')
+    packages = ('leapp',)
+    files = ('/var/lib/leapp',)
 
     def setup(self):
         self.add_copy_spec([
+            '/etc/migration-results',
+            '/etc/leapp/actor_cond.d',
+            '/etc/leapp/files/dnf.conf',
+            '/var/log/leapp/answerfile',
             '/var/log/leapp/dnf-debugdata/',
             '/var/log/leapp/leapp-preupgrade.log',
             '/var/log/leapp/leapp-upgrade.log',
@@ -29,5 +34,13 @@ class Leapp(Plugin, RedHatPlugin):
 
         # capture DB without sizelimit
         self.add_copy_spec('/var/lib/leapp/leapp.db', sizelimit=0)
+
+        self.add_cmd_output('leapp --version')
+
+    def postproc(self):
+        # Scrub password and proxy_password likewise from dnf.conf
+        self.do_file_sub("/etc/leapp/files/dnf.conf",
+                         r"(password(\s)*=(\s)*)(\S+)\n",
+                         r"\1********\n")
 
 # vim: set et ts=4 sw=4 :

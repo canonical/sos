@@ -89,9 +89,9 @@ def _get_index(model_name):
                         continue
 
                     units = juju_status["applications"][parent]["units"]
-                    for unit, unit_info in units.items():
+                    for _, unit_info in units.items():
                         node = f"{self.model_name}:{unit_info['machine']}"
-                        for sub_key, sub_value in unit_info.get(
+                        for sub_key, _ in unit_info.get(
                             "subordinates", {}
                         ).items():
                             if sub_key.startswith(app + "/"):
@@ -141,7 +141,9 @@ class juju(Cluster):
 
     def _cleanup_juju_output(self, output):
         """Remove leading characters before {."""
-        return re.sub(r"(^[^{]*)(.*)", "\\2", output, 0, re.MULTILINE)
+        return re.sub(
+            r"(^[^{]*)(.*)", "\\2", output, count=0, flags=re.MULTILINE
+        )
 
     def _get_model_info(self, model_name):
         """Parse juju status output and return target dict.
@@ -176,13 +178,7 @@ class juju(Cluster):
         juju_json_output = self._cleanup_juju_output((res["output"]))
 
         juju_status = None
-        try:
-            juju_status = json.loads(juju_json_output)
-        except json.JSONDecodeError:
-            raise Exception(
-                "Juju output is not valid json format."
-                f"Output: {juju_json_output}"
-            )
+        juju_status = json.loads(juju_json_output)
         return juju_status
 
     def _filter_by_pattern(self, key, patterns, model_info):

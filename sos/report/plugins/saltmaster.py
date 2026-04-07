@@ -21,6 +21,8 @@ class SaltMaster(Plugin, IndependentPlugin):
     packages = ('salt-master', 'salt-api',)
 
     def setup(self):
+        self.collected_pillar_roots = []
+
         if self.get_option("all_logs"):
             self.add_copy_spec("/var/log/salt")
         else:
@@ -52,17 +54,31 @@ class SaltMaster(Plugin, IndependentPlugin):
         all_pillar_roots = []
         for cfg in cfgs:
             with open(cfg, "r", encoding='UTF-8') as file:
-                cfg_pillar_roots = (
-                    yaml.safe_load(file).get("pillar_roots", {}).
-                    get("base", [])
-                )
+                try:
+                    cfg_pillar_roots = (
+                        yaml.safe_load(file).get("pillar_roots", {}).
+                        get("base", [])
+                    )
+                except AttributeError:
+                    cfg_pillar_roots = []
                 all_pillar_roots.extend(cfg_pillar_roots)
 
+        self.collected_pillar_roots = all_pillar_roots
         self.add_copy_spec(all_pillar_roots)
 
     def postproc(self):
-        regexp = r'(^\s+.*(pass|secret|(?<![A-z])key(?![A-z])).*:\ ).+$'
+        regexp = (
+            r'(^\s*.*(pass|secret|(?<![A-z])key(?![A-z])|'
+            r'api_?key|encryption_?key).*:\ ).+'
+        )
         subst = r'\1******'
+
         self.do_path_regex_sub("/etc/salt/*", regexp, subst)
+
+        for pillar_root in self.collected_pillar_roots:
+            normalized_root = pillar_root if pillar_root.endswith('/') else (
+                f"{pillar_root}/"
+            )
+            self.do_path_regex_sub(f"{normalized_root}*", regexp, subst)
 
 # vim: set et ts=4 sw=4 :

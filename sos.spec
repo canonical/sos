@@ -1,21 +1,20 @@
 Summary: A set of tools to gather troubleshooting information from a system
 Name: sos
-Version: 4.7.2
+Version: 4.11.0
 Release: 1%{?dist}
 Source0: https://github.com/sosreport/sos/archive/%{name}-%{version}.tar.gz
-License: GPL-2.0-or-later
+License: GPL-2.0-only
 BuildArch: noarch
 Url: https://github.com/sosreport/sos
 BuildRequires: python3-devel
 BuildRequires: python3-setuptools
-Requires: python3-rpm
 Requires: python3-pexpect
 %if 0%{?rhel} && 0%{?rhel} < 10
 Requires: python3-setuptools
 %else
 Requires: python3-packaging
 %endif
-Recommends: python3-magic
+Recommends: python3-file-magic
 # Mandatory just for uploading to a SFTP server:
 Recommends: python3-requests
 Recommends: python3-pyyaml
@@ -34,20 +33,20 @@ support technicians and developers.
 %prep
 %setup -qn %{name}-%{version}
 
-%if 0%{?fedora} >= 39
+%if 0%{?fedora} >= 39 || 0%{?rhel} >= 11
 %generate_buildrequires
 %pyproject_buildrequires
 %endif
 
 %build
-%if 0%{?fedora} >= 39
+%if 0%{?fedora} >= 39 || 0%{?rhel} >= 11
 %pyproject_wheel
 %else
 %py3_build
 %endif
 
 %install
-%if 0%{?fedora} >= 39
+%if 0%{?fedora} >= 39 || 0%{?rhel} >= 11
 %pyproject_install
 %pyproject_save_files sos
 %else
@@ -70,21 +69,19 @@ rm -rf %{buildroot}/usr/config/
 # internationalization is currently broken. Uncomment this line once fixed.
 # %%files -f %%{name}.lang
 %files
-%if 0%{?fedora} >= 39
+%if 0%{?fedora} >= 39 || 0%{?rhel} >= 11
 %{_bindir}/sos
-%{_bindir}/sosreport
-%{_bindir}/sos-collector
 %else
 %{_sbindir}/sos
-%{_sbindir}/sosreport
-%{_sbindir}/sos-collector
 %endif
+%dir /etc/sos
 %dir /etc/sos/cleaner
 %dir /etc/sos/presets.d
 %dir /etc/sos/extras.d
 %dir /etc/sos/groups.d
 %{_tmpfilesdir}/%{name}.conf
-%{python3_sitelib}/*
+%{python3_sitelib}/sos/
+%{python3_sitelib}/sos-*info/
 %{_mandir}/man1/*
 %{_mandir}/man5/*
 %doc AUTHORS README.md
@@ -92,6 +89,37 @@ rm -rf %{buildroot}/usr/config/
 %config(noreplace) %{_sysconfdir}/sos/sos.conf
 
 %changelog
+* Mon Feb 16 2026 Jake Hunsaker <jacob.r.hunsaker@gmail.com> = 4.11.0
+- New upstream release
+
+* Mon Dec 15 2025 Pavel Moravec <pmoravec@redhat.com> = 4.10.2
+- New upstream release
+
+* Wed Oct 15 2025 Pavel Moravec <pmoravec@redhat.com> = 4.10.1
+- New upstream release
+
+* Mon Aug 18 2025 Jake Hunsaker <jacob.r.hunsaker@gmail.com> = 4.10.0
+- New upstream release
+
+* Tue Jun 17 2025 Pavel Moravec <pmoravec@redhat.com> = 4.9.2
+- New upstream release
+
+* Tue Apr 15 2025 Pavel Moravec <pmoravec@redhat.com> = 4.9.1
+- New upstream release
+
+* Mon Feb 17 2025 Jake Hunsaker <jacob.r.hunsaker@gmail.com> = 4.9.0
+- New upstream release
+
+* Mon Dec 16 2024 Pavel Moravec <pmoravec@redhat.com> = 4.8.2
+- New upstream release
+
+* Tue Oct 15 2024 Pavel Moravec <pmoravec@redhat.com> = 4.8.1
+- New upstream release
+
+* Sat Aug 17 2024 Jake Hunsaker <jacob.r.hunsaker@gmail.com> = 4.8.0
+- New upstream release
+- License clarification to GPLv2 only
+
 * Fri Jun 21 2024 Pavel Moravec <pmoravec@redhat.com> = 4.7.2
 - New upstream release
 
@@ -170,10 +198,10 @@ rm -rf %{buildroot}/usr/config/
 
 * Wed Sep 17 2014 Bryn M. Reeves <bmr@redhat.com> = 3.2-beta1
 - New upstream beta release
- 
+
 * Thu Jun 12 2014 Bryn M. Reeves <bmr@redhat.com> = 3.2-alpha1
 - New upstream alpha release
- 
+
 * Mon Jan 27 2014 Bryn M. Reeves <bmr@redhat.com> = 3.1-1
 - New upstream release
 
@@ -302,7 +330,7 @@ rm -rf %{buildroot}/usr/config/
 - Improve sanitization of RHN user and case number in report name
   Resolves: bz771393
 - Fix verbose output and debug logging
-  Resolves: bz782339 
+  Resolves: bz782339
 - Add basic support for CloudForms data collection
   Resolves: bz752666
 - Add support for Subscription Asset Manager diagnostics
@@ -347,7 +375,7 @@ rm -rf %{buildroot}/usr/config/
 * Tue Nov  1 2011 Bryn M. Reeves <bmr@redhat.com> = 2.2-17
 - Do not collect subscription manager keys in general plugin
   Resolves: bz750607
- 
+
 * Fri Sep 23 2011 Bryn M. Reeves <bmr@redhat.com> = 2.2-16
 - Fix execution of RHN hardware.py from hardware plugin
   Resolves: bz736718
@@ -405,7 +433,7 @@ rm -rf %{buildroot}/usr/config/
 * Thu Apr 07 2011 Bryn M. Reeves <bmr@redhat.com> = 2.2-8
 - Use sha256 for report digest when operating in FIPS mode
   Resolves: bz689387
- 
+
 * Tue Apr 05 2011 Bryn M. Reeves <bmr@redhat.com> = 2.2-7
 - Fix parted and dumpe2fs output on s390
   Resolves: bz622784
@@ -774,4 +802,3 @@ rm -rf %{buildroot}/usr/config/
 
 * Mon May 22 2006 John Berninger <jwb at redhat dot com> - 0.1-1
 - initial package build
-

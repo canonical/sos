@@ -20,13 +20,14 @@ import pdb
 from datetime import datetime
 import glob
 
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from shutil import rmtree
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import sos.report.plugins
 from sos.utilities import (ImporterHelper, SoSTimeoutError, bold,
                            sos_get_command_output, TIMEOUT_DEFAULT, listdir,
-                           is_executable)
+                           is_executable, scrub_url_credential)
 
 from sos import _sos as _
 from sos import __version__
@@ -36,6 +37,7 @@ from sos.report.reporting import (Report, Section, Command, CopiedFile,
                                   CreatedFile, Alert, Note, PlainTextReport,
                                   JSONReport, HTMLReport)
 from sos.cleaner import SoSCleaner
+from sos.upload import SoSUpload
 
 # file system errors that should terminate a run
 fatal_fs_errors = (errno.ENOSPC, errno.EROFS)
@@ -69,6 +71,12 @@ def _format_since(date):
 
 # valid modes for --chroot
 chroot_modes = ["auto", "always", "never"]
+
+# collect default env vars
+default_env_vars = {
+    'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY',
+    'NO_PROXY', 'ALL_PROXY'
+}
 
 
 class SoSReport(SoSComponent):
@@ -139,8 +147,10 @@ class SoSReport(SoSComponent):
         'upload_s3_access_key': None,
         'upload_s3_secret_key': None,
         'upload_s3_object_prefix': None,
+        'upload_target': None,
         'add_preset': '',
-        'del_preset': ''
+        'del_preset': '',
+        'treat_certificates': 'obfuscate'
     }
 
     def __init__(self, parser, args, cmdline):
@@ -148,7 +158,7 @@ class SoSReport(SoSComponent):
         self.loaded_plugins = []
         self.skipped_plugins = []
         self.all_options = []
-        self.env_vars = set()
+        self.env_vars = default_env_vars
         self._args = args
         self.sysroot = "/"
         self.estimated_plugsizes = {}
@@ -387,6 +397,15 @@ class SoSReport(SoSComponent):
         cleaner_grp.add_argument('--usernames', dest='usernames', default=[],
                                  action='extend',
                                  help='List of usernames to obfuscate')
+        cleaner_grp.add_argument('--treat-certificates', default='obfuscate',
+                                 choices=['obfuscate', 'keep', 'remove'],
+                                 dest='treat_certificates',
+                                 help=(
+                                    'How to treat the certificate files '
+                                    '[.csr .crt .pem]. Defaults to "obfuscate"'
+                                    ' after convert the file to text. '
+                                    ' "Key" certificate files are always '
+                                    'removed.'))
 
     @classmethod
     def display_help(cls, section):
@@ -439,12 +458,12 @@ class SoSReport(SoSComponent):
             'policies': 'How sos operates on different distributions'
         }
         helpln = ''
-        for ln in help_lines:
-            ssec.add_text(f"\t{ln:<36}{help_lines[ln]}", newline=False)
+        for ln, value in help_lines.items():
+            ssec.add_text(f"\t{ln:<36}{value}", newline=False)
         ssec.add_text(helpln)
 
     def print_header(self):
-        print(f"\n{_(f'sos report (version {__version__})')}\n")
+        self.ui_log.info(f"\n{_(f'sos report (version {__version__})')}\n")
 
     def _get_hardware_devices(self):
         self.devices = {
@@ -779,16 +798,16 @@ class SoSReport(SoSComponent):
 
     def _is_in_profile(self, plugin_class):
         only_plugins = self.opts.only_plugins
-        if not len(self.opts.profiles):
+        if not self.opts.profiles:
             return True
         if not hasattr(plugin_class, "profiles"):
             return False
         if only_plugins and not self._is_not_specified(plugin_class.name()):
             return True
-        return any([p in self.opts.profiles for p in plugin_class.profiles])
+        return any(p in self.opts.profiles for p in plugin_class.profiles)
 
     def _is_skipped(self, plugin_name):
-        return (plugin_name in self.opts.skip_plugins)
+        return plugin_name in self.opts.skip_plugins
 
     def _is_inactive(self, plugin_name, pluginClass):
         return (not pluginClass(self.get_commons()).check_enabled() and
@@ -835,10 +854,10 @@ class SoSReport(SoSComponent):
 
         # validate and load plugins
         for plug in plugins:
-            plugbase, ext = os.path.splitext(plug)
+            plugbase, __ = os.path.splitext(plug)
             try:
                 plugin_classes = import_plugin(plugbase, valid_plugin_classes)
-                if not len(plugin_classes):
+                if not plugin_classes:
                     # no valid plugin classes for this policy
                     continue
 
@@ -847,7 +866,7 @@ class SoSReport(SoSComponent):
                 if not validate_plugin(plugin_class,
                                        experimental=self.opts.experimental):
                     self.soslog.warning(
-                        _("plugin %s does not validate, skipping") % plug)
+                        _(f"plugin {plug} does not validate, skipping"))
                     if self.opts.verbosity > 0:
                         self._skip(plugin_class, _("does not validate"))
                         continue
@@ -887,18 +906,18 @@ class SoSReport(SoSComponent):
                         remaining_profiles.remove(i)
                 self._load(plugin_class)
             except Exception as e:
-                self.soslog.warning(_("plugin %s does not install, "
-                                      "skipping: %s") % (plug, e))
+                self.soslog.warning(_(f"plugin {plug} does not install, "
+                                      f"skipping: {e}"))
                 self.handle_exception()
         if len(remaining_profiles) > 0:
-            self.soslog.error(_("Unknown or inactive profile(s) provided:"
-                                " %s") % ", ".join(remaining_profiles))
+            self.soslog.error(_('Unknown or inactive profile(s) provided:'
+                                f' {", ".join(remaining_profiles)}'))
             self.list_profiles()
             self._exit(1)
 
     def _set_all_options(self):
         if self.opts.alloptions:
-            for plugname, plug in self.loaded_plugins:
+            for __, plug in self.loaded_plugins:
                 for opt in plug.options.values():
                     if bool in opt.val_type:
                         opt.value = True
@@ -913,17 +932,17 @@ class SoSReport(SoSComponent):
                     val = True
 
                 if isinstance(val, str):
-                    val = val.lower()
-                    if val in ["on", "enable", "enabled", "true", "yes"]:
+                    arg = val.lower()
+                    if arg in ["on", "enable", "enabled", "true", "yes"]:
                         val = True
-                    elif val in ["off", "disable", "disabled", "false", "no"]:
+                    elif arg in ["off", "disable", "disabled", "false", "no"]:
                         val = False
                     else:
                         # try to convert string "val" to int()
                         try:
-                            val = int(val)
+                            val = int(arg)
                         except ValueError:
-                            # not a number to convert back to int from argparse
+                            # Value is a string argument to be used unmodified
                             pass
 
                 try:
@@ -954,7 +973,7 @@ class SoSReport(SoSComponent):
                             self.soslog.error(err)
                             self._exit(1)
                     del opts[plugname]
-            for plugname in opts.keys():
+            for plugname in opts:
                 self.soslog.error('WARNING: unable to set option for disabled '
                                   f'or non-existing plugin ({plugname}).')
             # in case we printed warnings above, visually intend them from
@@ -978,7 +997,7 @@ class SoSReport(SoSComponent):
                 )
 
     def _set_plugin_options(self):
-        for plugin_name, plugin in self.loaded_plugins:
+        for __, plugin in self.loaded_plugins:
             for opt in plugin.options:
                 self.all_options.append(plugin.options[opt])
 
@@ -1011,7 +1030,7 @@ class SoSReport(SoSComponent):
 
     def _report_profiles_and_plugins(self):
         self.ui_log.info("")
-        if len(self.loaded_plugins):
+        if self.loaded_plugins:
             self.ui_log.info(f" {len(self.profiles)} profiles, "
                              f"{len(self.loaded_plugins)} plugins")
         else:
@@ -1028,7 +1047,7 @@ class SoSReport(SoSComponent):
             self.ui_log.info(_("The following plugins are currently enabled:"))
             self.ui_log.info("")
             for (plugname, plug) in self.loaded_plugins:
-                self.ui_log.info(f"{plugname:<20} {plug.get_description()}")
+                self.ui_log.info(f" {plugname:<30} {plug.get_description()}")
         else:
             self.ui_log.info(_("No plugin enabled."))
         self.ui_log.info("")
@@ -1038,7 +1057,7 @@ class SoSReport(SoSComponent):
                                "disabled:"))
             self.ui_log.info("")
             for (plugname, plugclass, reason) in self.skipped_plugins:
-                self.ui_log.info(f"{plugname:<20} {reason:<14} "
+                self.ui_log.info(f" {plugname:<30} {reason:<14} "
                                  f"{plugclass.get_description()}")
 
         self.ui_log.info("")
@@ -1059,7 +1078,7 @@ class SoSReport(SoSComponent):
                         val = TIMEOUT_DEFAULT
                 if opt.name == 'postproc':
                     val = not self.opts.no_postproc
-                self.ui_log.info(f"{opt.name:<25} {val:<15} {opt.desc}")
+                self.ui_log.info(f" {opt.name:<25} {val:<15} {opt.desc}")
             self.ui_log.info("")
 
             self.ui_log.info(_("The following plugin options are available:"))
@@ -1079,7 +1098,7 @@ class SoSReport(SoSComponent):
                 if tmpopt is None:
                     tmpopt = 0
 
-                self.ui_log.info(f" {f'{opt.plugin}.{opt.name}':<25} "
+                self.ui_log.info(f" {f'{opt.plugin}.{opt.name}':<40} "
                                  f"{tmpopt:<15} {opt.desc}")
         else:
             self.ui_log.info(_("No plugin options available."))
@@ -1125,14 +1144,14 @@ class SoSReport(SoSComponent):
             if not preset:
                 continue
             preset = self.policy.find_preset(preset)
-            self.ui_log.info(f"name: {preset.name:>14}")
-            self.ui_log.info(f"description: {preset.desc:>14}")
+            self.ui_log.info(f"{'name:':>14} {preset.name}")
+            self.ui_log.info(f"{'description:':>14} {preset.desc}")
             if preset.note:
-                self.ui_log.info(f"note: {preset.note:>14}")
+                self.ui_log.info(f"{'note:':>14} {preset.note}")
 
             if self.opts.verbosity > 0:
                 args = preset.opts.to_args()
-                options_str = f"{'options:':>14}"
+                options_str = f"{'options:':>14} "
                 lines = _format_list(options_str, args, indent=True, sep=' ')
                 for line in lines:
                     self.ui_log.info(line)
@@ -1181,7 +1200,7 @@ class SoSReport(SoSComponent):
         try:
             policy.del_preset(name=name)
         except Exception as e:
-            self.ui_log.error(str(e) + "\n")
+            self.ui_log.error(f"{str(e)}\n")
             return False
 
         self.ui_log.info(f"Deleted preset '{name}'\n")
@@ -1219,7 +1238,7 @@ class SoSReport(SoSComponent):
             self.setup_archive()
             self._make_archive_paths()
             return
-        except (OSError, IOError) as e:
+        except OSError as e:
             # we must not use the logging subsystem here as it is potentially
             # in an inconsistent or unreliable state (e.g. an EROFS for the
             # file system containing our temporary log files).
@@ -1256,8 +1275,8 @@ class SoSReport(SoSComponent):
                 plug.manifest.add_field('setup_end', end)
                 plug.manifest.add_field('setup_time', end - start)
             except KeyboardInterrupt:
-                raise
-            except (OSError, IOError) as e:
+                raise KeyboardInterrupt  # pylint: disable=raise-missing-from
+            except OSError as e:
                 if e.errno in fatal_fs_errors:
                     self.ui_log.error("")
                     self.ui_log.error(
@@ -1318,7 +1337,7 @@ class SoSReport(SoSComponent):
                 end = datetime.now()
                 _plug.manifest.add_field('end_time', end)
                 _plug.manifest.add_field('run_time', end - start)
-            except TimeoutError:
+            except FuturesTimeoutError:
                 msg = f"Plugin {plugin[1]} timed out"
                 # log to ui_log.error to show the user, log to soslog.info
                 # so that someone investigating the sos execution has it all
@@ -1371,13 +1390,14 @@ class SoSReport(SoSComponent):
                 self.pluglist.remove(plugin)
             except ValueError:
                 self.soslog.debug(
-                    f"Could not remove {plugin} from plugin list, ignoring..."
+                    f"Could not remove {plugname} from plugin list, "
+                    f"ignoring..."
                 )
             try:
                 self.running_plugs.remove(plugname)
             except ValueError:
                 self.soslog.debug(
-                    f"Could not remove {plugin} from running plugin list, "
+                    f"Could not remove {plugname} from running plugin list, "
                     f"ignoring..."
                 )
             status = ''
@@ -1393,7 +1413,7 @@ class SoSReport(SoSComponent):
             # we already log and handle the plugin timeout in the nested thread
             # pool this is running in, so don't do anything here.
             pass
-        except (OSError, IOError) as e:
+        except OSError as e:
             if e.errno in fatal_fs_errors:
                 self.ui_log.error(
                     f"\n {e.strerror} while collecting plugin data")
@@ -1418,7 +1438,7 @@ class SoSReport(SoSComponent):
         if not self.env_vars:
             return
         env = '\n'.join([
-            f"{name}={val}" for (name, val) in
+            f"{name}={scrub_url_credential(val)}" for (name, val) in
             [(name, f'{os.environ.get(name)}') for name in self.env_vars if
              os.environ.get(name) is not None]
         ]) + '\n'
@@ -1449,7 +1469,7 @@ class SoSReport(SoSComponent):
                                         cmd['file']
                                     )))
 
-            for content, f, tags in plug.copy_strings:
+            for __, f, __ in plug.copy_strings:
                 section.add(CreatedFile(name=f,
                                         href=os.path.join("..", f)))
 
@@ -1471,7 +1491,7 @@ class SoSReport(SoSComponent):
                 fd.flush()
                 self.archive.add_file(fd, dest=os.path.join('sos_reports',
                                                             filename))
-            except (OSError, IOError) as e:
+            except OSError as e:
                 if e.errno in fatal_fs_errors:
                     self.ui_log.error("")
                     self.ui_log.error(
@@ -1483,11 +1503,16 @@ class SoSReport(SoSComponent):
         for plugname, plug in self.loaded_plugins:
             try:
                 if plug.get_option('postproc'):
+                    start = datetime.now()
+                    plug.manifest.add_field('postproc_start', start)
                     plug.postproc()
+                    end = datetime.now()
+                    plug.manifest.add_field('postproc_end', end)
+                    plug.manifest.add_field('postproc_time', end - start)
                 else:
                     self.soslog.info(
                         f"Skipping postproc for plugin {plugname}")
-            except (OSError, IOError) as e:
+            except OSError as e:
                 if e.errno in fatal_fs_errors:
                     self.ui_log.error("")
                     self.ui_log.error(
@@ -1504,24 +1529,22 @@ class SoSReport(SoSComponent):
 
         try:
             hash_size = 1024**2  # Hash 1MiB of content at a time.
-            archive_fp = open(archive, 'rb')
             digest = hashlib.new(hash_name)
-            while True:
-                hashdata = archive_fp.read(hash_size)
-                if not hashdata:
-                    break
-                digest.update(hashdata)
-            archive_fp.close()
+            with open(archive, 'rb') as archive_fp:
+                while True:
+                    hashdata = archive_fp.read(hash_size)
+                    if not hashdata:
+                        break
+                    digest.update(hashdata)
         except Exception:
             self.handle_exception()
         return digest.hexdigest()
 
     def _write_checksum(self, archive, hash_name, checksum):
         # store checksum into file
-        fp = open(archive + "." + hash_name, "w")
-        if checksum:
-            fp.write(checksum + "\n")
-        fp.close()
+        with open(archive + "." + hash_name, "w", encoding='utf-8') as fp:
+            if checksum:
+                fp.write(checksum + "\n")
 
     def final_work(self):
         archive = None    # archive path
@@ -1558,13 +1581,10 @@ class SoSReport(SoSComponent):
         # Now, separately clean the log files that cleaner also wrote to
         if do_clean:
             _dir = os.path.join(self.tmpdir, self.archive._name)
-            cleaner.obfuscate_file(os.path.join(_dir, 'sos_logs', 'sos.log'),
-                                   short_name='sos.log')
-            cleaner.obfuscate_file(os.path.join(_dir, 'sos_logs', 'ui.log'),
-                                   short_name='ui.log')
+            cleaner.obfuscate_file(os.path.join(_dir, 'sos_logs', 'sos.log'))
+            cleaner.obfuscate_file(os.path.join(_dir, 'sos_logs', 'ui.log'))
             cleaner.obfuscate_file(
-                os.path.join(_dir, 'sos_reports', 'manifest.json'),
-                short_name='manifest.json'
+                    os.path.join(_dir, 'sos_reports', 'manifest.json')
             )
 
         # Now, just (optionally) pack the report and print work outcome; let
@@ -1582,7 +1602,7 @@ class SoSReport(SoSComponent):
             # that still will be moved to the sos report final directory path
             tmpdir_path = Path(self.tmpdir)
             self.estimated_plugsizes['sos_logs_reports'] = sum(
-                    [f.lstat().st_size for f in tmpdir_path.glob('**/*')])
+                    f.lstat().st_size for f in tmpdir_path.glob('**/*'))
 
             _sum = get_human_readable(sum(self.estimated_plugsizes.values()))
             self.ui_log.info("Estimated disk space requirement for whole "
@@ -1611,7 +1631,7 @@ class SoSReport(SoSComponent):
                     self.archive.rename_archive_root(cleaner)
                 archive = self.archive.finalize(
                     self.opts.compression_type)
-            except (OSError, IOError) as e:
+            except OSError as e:
                 print("")
                 print(_(f" {e.strerror} while finalizing archive "
                         f"{self.archive.get_archive_path()}"))
@@ -1621,8 +1641,7 @@ class SoSReport(SoSComponent):
             except Exception:
                 if self.opts.debug:
                     raise
-                else:
-                    return False
+                return False
             finally:
                 os.umask(old_umask)
         else:
@@ -1639,7 +1658,7 @@ class SoSReport(SoSComponent):
                 final_dir = os.path.join(self.sys_tmp, dir_name)
                 os.rename(directory, final_dir)
                 directory = final_dir
-            except (OSError, IOError):
+            except OSError:
                 print(_(f"Error moving directory: {directory}"))
                 return False
 
@@ -1661,7 +1680,7 @@ class SoSReport(SoSComponent):
                     return False
                 try:
                     self._write_checksum(archive, hash_name, checksum)
-                except (OSError, IOError):
+                except OSError:
                     print(_(f"Error writing checksum for file: {archive}"))
 
                 # output filename is in the private tmpdir - move it to the
@@ -1682,7 +1701,7 @@ class SoSReport(SoSComponent):
                 try:
                     os.rename(archive, final_name)
                     archive = final_name
-                except (OSError, IOError):
+                except OSError:
                     print(_(f"Error moving archive file: {archive}"))
                     return False
 
@@ -1700,7 +1719,7 @@ class SoSReport(SoSComponent):
                 # under the control of the user creating the link.
                 try:
                     os.rename(archive_hash, final_hash)
-                except (OSError, IOError):
+                except OSError:
                     print(_(f"Error moving checksum file: {archive_hash}"))
 
                 self.policy.display_results(archive, directory, checksum,
@@ -1713,7 +1732,20 @@ class SoSReport(SoSComponent):
                 or self.opts.upload_s3_endpoint):
             if not self.opts.build:
                 try:
-                    self.policy.upload_archive(archive)
+                    hook_commons = {
+                        'policy': self.policy,
+                        'tmpdir': self.tmpdir,
+                        'sys_tmp': self.sys_tmp,
+                        'options': self.opts,
+                        'manifest': self.manifest
+                    }
+                    uploader = SoSUpload(parser=self.parser,
+                                         args=self.args,
+                                         cmdline=self.cmdline,
+                                         in_place=True,
+                                         hook_commons=hook_commons,
+                                         archive=archive)
+                    uploader.execute()
                     self.ui_log.info(_("Uploaded archive successfully"))
                 except Exception as err:
                     self.ui_log.error(f"Upload attempt failed: {err}")
@@ -1796,8 +1828,8 @@ class SoSReport(SoSComponent):
 
     def _merge_preset_options(self):
         # Log command line options
-        msg = "[%s:%s] executing 'sos %s'"
-        self.soslog.info(msg % (__name__, "setup", " ".join(self.cmdline)))
+        self.soslog.info(f"[{__name__}:setup] executing "
+                         f"'sos {' '.join(self.cmdline)}'")
 
         # Log active preset defaults
         preset_args = self.preset.opts.to_args()
@@ -1848,26 +1880,29 @@ class SoSReport(SoSComponent):
             if not self.opts.no_report:
                 self.generate_reports()
             if not self.opts.no_postproc:
+                self.ui_log.info('Starting post-processing of collected data')
                 self.postproc()
             else:
-                self.ui_log.info("Skipping postprocessing of collected data")
+                self.ui_log.info("Skipping post-processing of collected data")
             self.version()
             return self.final_work()
 
-        except (OSError):
+        except OSError:
             if self.opts.debug:
                 raise
             if not os.getenv('SOS_TEST_LOGS', None) == 'keep':
                 self.cleanup()
-        except (KeyboardInterrupt):
+        except KeyboardInterrupt:
             self.ui_log.error("\nExiting on user cancel")
             self.cleanup()
             self._exit(130)
-        except (SystemExit) as e:
+        except SystemExit as e:
             if not os.getenv('SOS_TEST_LOGS', None) == 'keep':
                 self.cleanup()
             sys.exit(e.code)
 
         self._exit(1)
+        # Never gets here. This is to fix "inconsistent-return-statements
+        return False
 
 # vim: set et ts=4 sw=4 :

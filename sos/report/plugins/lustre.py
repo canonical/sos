@@ -33,7 +33,7 @@ class Lustre(Plugin, RedHatPlugin):
             "lctl device_list",
             "lctl list_nids",
             "lctl route_list",
-            "lnetctl net show -v"
+            "lnetctl net show -v 4"
         ])
 
         # Grab almost everything
@@ -49,6 +49,9 @@ class Lustre(Plugin, RedHatPlugin):
             ["version", "health_check", "debug"]
         )
 
+        # copy lnet settings if present
+        self.add_copy_spec("/etc/lnet.conf")
+
         # Client Specific
         self.add_cmd_output([
             "lfs df",
@@ -62,10 +65,11 @@ class Lustre(Plugin, RedHatPlugin):
         ])
 
         # Server Specific
-        self.get_params(
-            "osd",
-            ["osd-*.*.{mntdev,files*,kbytes*,blocksize,brw_stats}"]
-        )
+        self.get_params("osd", [
+            "osd-*.*.{blocksize,brw_stats,enable_projid_xattr,extent*}",
+            "osd-*.*.{fallocate_*,full_scrub_*,files*,kbytes*,mntdev}",
+            "osd-*.*.{nonrotational,oi_scrub,pdo,stats,read*,write*}"
+        ])
         self.get_params("quota", ["osd-*.*.quota_slave.{info,limit_*,acct_*}"])
         self.get_params("mgs", ["mgs.MGS.ir_timeout", "mgs.MGS.live.*"])
 

@@ -79,7 +79,7 @@ class ocp(Cluster):
             self._oc_cmd = 'oc'
             if self.primary.host.in_container():
                 _oc_path = self.primary.run_command(
-                    'which oc', chroot=self.primary.host.sysroot
+                    'which oc'
                 )
                 if _oc_path['status'] == 0:
                     self._oc_cmd = os.path.join(
@@ -232,8 +232,8 @@ class ocp(Cluster):
             for node in nodelist:
                 _node = node.split()
                 nodes[_node[0]] = {}
-                for column in idx:
-                    nodes[_node[0]][column] = _node[idx[column]]
+                for column, value in idx.items():
+                    nodes[_node[0]][column] = _node[value]
         return nodes
 
     def set_transport_type(self):
@@ -264,7 +264,7 @@ class ocp(Cluster):
                 self.log_warn("NOTE: By default, only master nodes are listed."
                               "\nTo collect from all/more nodes, override the "
                               "role option with '-c ocp.role=role1:role2'")
-            roles = [r for r in self.get_option('role').split(':')]
+            roles = list(self.get_option('role').split(':'))
             self.node_dict = self._build_dict(res['output'].splitlines())
             for node_name, node in self.node_dict.items():
                 if roles:
@@ -290,10 +290,10 @@ class ocp(Cluster):
                 return label
         return ''
 
-    def check_node_is_primary(self, sosnode):
-        if sosnode.address not in self.node_dict:
+    def check_node_is_primary(self, node):
+        if node.address not in self.node_dict:
             return False
-        return 'master' in self.node_dict[sosnode.address]['roles']
+        return 'master' in self.node_dict[node.address]['roles']
 
     def _toggle_api_opt(self, node, use_api):
         """In earlier versions of sos, the openshift plugin option that is
@@ -368,7 +368,7 @@ class ocp(Cluster):
             elif node.file_exists(_kubeconfig):
                 # if the file exists, then the openshift sos plugin will use it
                 # if the with-api option is turned on
-                if not _kubeconfig == master_kube:
+                if _kubeconfig != master_kube:
                     node.plugopts.append(
                         f"openshift.kubeconfig={_kubeconfig}"
                     )

@@ -46,6 +46,18 @@ class Kubernetes(Plugin):
     config_files = [
         "/etc/kubernetes",
         "/run/flannel",
+        "/var/lib/kubelet/config.yaml",
+        "/var/lib/kubelet/kubeadm-flags.env",
+        "/var/lib/kubelet/*_manager_state",
+    ]
+    forbidden_paths = [
+        "/etc/kubernetes/pki",
+    ]
+    kube_system_logs = [
+        "/var/log/pods/kube-system_etcd-*",
+        "/var/log/pods/kube-system_kube-apiserver-*",
+        "/var/log/pods/kube-system_kube-controller-manager-*",
+        "/var/log/pods/kube-system_kube-scheduler-*",
     ]
     resources = [
         'events',
@@ -82,8 +94,10 @@ class Kubernetes(Plugin):
                   desc='collect all namespace output separately'),
         PluginOpt('describe', default=False,
                   desc='collect describe output of all resources'),
+        PluginOpt('kubelogs', default=False,
+                  desc='copy some kube-system pod logs without using the API'),
         PluginOpt('podlogs', default=False,
-                  desc='capture stdout/stderr logs from pods'),
+                  desc='capture stdout/stderr logs from pods using the API'),
         PluginOpt('podlogs-filter', default='', val_type=str,
                   desc='only collect logs from pods matching this pattern')
     ]
@@ -104,6 +118,11 @@ class Kubernetes(Plugin):
 
     def setup(self):
         self.add_copy_spec(self.config_files)
+
+        self.add_forbidden_path(self.forbidden_paths)
+
+        if self.get_option('kubelogs'):
+            self.add_copy_spec(self.kube_system_logs)
 
         self.add_env_var([
             'KUBECONFIG',
@@ -294,7 +313,9 @@ class RedHatKubernetes(Kubernetes, RedHatPlugin):
 
 class UbuntuKubernetes(Kubernetes, UbuntuPlugin, DebianPlugin):
 
-    packages = KUBE_PACKAGES
+    packages = KUBE_PACKAGES + (
+        'k8s',
+    )
 
     files = KUBECONFIGS + (
         '/root/cdk/cdk_addons_kubectl_config',
@@ -316,12 +337,54 @@ class UbuntuKubernetes(Kubernetes, UbuntuPlugin, DebianPlugin):
 
         if self.is_installed('microk8s'):
             self.kube_cmd = 'microk8s kubectl'
+        elif self.is_installed('k8s'):
+            self.kube_cmd = 'k8s kubectl'
+            self._canonical_kubernetes()
 
         self.config_files.extend([
             '/root/cdk/kubelet/config.yaml',
             '/root/cdk/audit/audit-policy.yaml',
         ])
         super().setup()
+
+    def _canonical_kubernetes(self):
+        k8s_units = ['snap.k8s.containerd.service',
+                     'snap.k8s.etcd.service',
+                     'snap.k8s.k8sd.service',
+                     'snap.k8s.kube-apiserver.service',
+                     'snap.k8s.kube-controller-manager.service',
+                     'snap.k8s.kube-proxy.service',
+                     'snap.k8s.kube-scheduler.service',
+                     'snap.k8s.kubelet.service']
+        self.add_journal(units=k8s_units)
+
+        k8s_cmd = "k8s"
+        k8s_common = "/var/snap/k8s/common"
+
+        k8s_subcmds = [
+            'status',
+            'get',
+        ]
+
+        self.add_copy_spec([
+            f"{k8s_common}/args",
+            f"{k8s_common}/var/lib/k8s-dqlite/info.yaml",
+            f"{k8s_common}/var/lib/k8s-dqlite/cluster.yaml",
+            f"{k8s_common}/var/lib/k8sd/state/truststore/k8s.yaml",
+            f"{k8s_common}/var/lib/k8sd/state/database/info.yaml",
+            f"{k8s_common}/var/lib/k8sd/state/database/cluster.yaml",
+            f"{k8s_common}/var/lib/k8sd/state/daemon.yaml",
+        ])
+
+        self.add_cmd_output([
+            f"{k8s_cmd} {subcmd}" for subcmd in k8s_subcmds
+        ])
+
+    def postproc(self):
+        super().postproc()
+
+        self.do_file_private_sub(
+            "/var/snap/k8s/common/var/lib/k8sd/state/truststore/k8s.yaml")
 
 
 # vim: et ts=5 sw=4

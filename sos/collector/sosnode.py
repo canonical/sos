@@ -51,6 +51,8 @@ class SosNode():
         self.hostlen = commons['hostlen']
         self.need_sudo = commons['need_sudo']
         self.sos_options = commons['sos_options']
+        self.node_config_file = self.opts.node_config_file
+        self.inherit_config_file = self.opts.inherit_config_file
         self.local = False
         self.host = None
         self.cluster = None
@@ -93,6 +95,7 @@ class SosNode():
         # cluster primary but do not want a local report as we still need to do
         # package checks in that instance
         self.host = self.determine_host_policy()
+        self._sudo_binary = None
         self.hostname = self._transport.hostname
         if self.local and self.opts.no_local:
             load_facts = False
@@ -106,6 +109,7 @@ class SosNode():
             if self.host.containerized:
                 self.create_sos_container()
             self._load_sos_info()
+        return None
 
     @property
     def connected(self):
@@ -126,9 +130,9 @@ class SosNode():
         if self.address in ['localhost', '127.0.0.1']:
             self.local = True
             return LocalTransport(self.address, commons)
-        elif self.opts.transport in TRANSPORTS.keys():
+        if self.opts.transport in TRANSPORTS:
             return TRANSPORTS[self.opts.transport](self.address, commons)
-        elif self.opts.transport != 'auto':
+        if self.opts.transport != 'auto':
             self.log_error(
                 "Connection failed: unknown or unsupported transport "
                 f"{self.opts.transport}"
@@ -154,12 +158,27 @@ class SosNode():
                         self._env_vars[_val[0]] = _val[1]
         return self._env_vars
 
+    @property
+    def sudo_binary(self):
+        if not self._sudo_binary:
+            _bin = self.opts.sudo_binary.split('/')[-1]
+            # verify the provided binary is at least in our PATH
+            if ret := self.run_command(f"command -v {_bin}"):
+                if not ret['status'] == 0:
+                    err = f"Privilege escalation command not in PATH: {_bin}"
+                    self.log_error(err)
+                    raise Exception(err)
+            if _bin == 'sudo':
+                _bin = 'sudo -S'
+            self._sudo_binary = _bin
+        return self._sudo_binary
+
     def set_node_manifest(self, manifest):
         """Set the manifest section that this node will write to
         """
         self.manifest = manifest
         self.manifest.add_field('hostname', self._hostname)
-        self.manifest.add_field('policy', self.host.distro)
+        self.manifest.add_field('policy', self.host.os_release_name)
         self.manifest.add_field('sos_version', self.sos_info['version'])
         self.manifest.add_field('final_sos_command', '')
         self.manifest.add_field('transport', self._transport.name)
@@ -194,7 +213,7 @@ class SosNode():
                             "and password or authfile"
                         )
                         raise Exception
-                    elif 'unknown: Not found' in res['output']:
+                    if 'unknown: Not found' in res['output']:
                         self.log_error('Specified image not found on registry')
                         raise Exception
                     # 'name exists' with code 125 means the container was
@@ -207,14 +226,13 @@ class SosNode():
                     self.log_info("Temporary container "
                                   f"{self.host.sos_container_name} created")
                     return True
-                else:
-                    self.log_error("Could not start container after create: "
-                                   f"{ret['output']}")
-                    raise Exception
-            else:
-                self.log_error("Could not create container on host: "
-                               f"{res['output']}")
+                self.log_error("Could not start container after create: "
+                               f"{ret['output']}")
                 raise Exception
+
+            self.log_error("Could not create container on host: "
+                           f"{res['output']}")
+            raise Exception
         return False
 
     def get_container_auth(self):
@@ -226,10 +244,9 @@ class SosNode():
                 self.opts.registry_user,
                 self.opts.registry_password
             )
-        else:
-            return self.host.runtimes['default'].fmt_registry_authfile(
-                self.opts.registry_authfile or self.host.container_authfile
-            )
+        return self.host.runtimes['default'].fmt_registry_authfile(
+            self.opts.registry_authfile or self.host.container_authfile
+        )
 
     def file_exists(self, fname, need_root=False):
         """Checks for the presence of fname on the remote node"""
@@ -278,10 +295,13 @@ class SosNode():
         """If we need to provide a sudo or root password to a command, then
         here we prefix the command with the correct bits
         """
+        is_root = self._env_vars.get("USER", os.environ.get("USER")) == 'root'
+        if self.local and is_root:
+            return cmd
         if self.opts.become_root:
             return f"su -c {quote(cmd)}"
         if self.need_sudo:
-            return f"sudo -S {cmd}"
+            return f"{self.sudo_binary} {cmd}"
         return cmd
 
     def _load_sos_info(self):
@@ -368,7 +388,8 @@ class SosNode():
             for line in result.splitlines():
                 if not is_list:
                     try:
-                        res.append(line.split()[0])
+                        if ls := line.split():
+                            res.append(ls[0])
                     except Exception as err:
                         self.log_debug(f"Error parsing sos help: {err}")
                 else:
@@ -391,14 +412,14 @@ class SosNode():
         """
         if self.local:
             self.log_info(
-                f"using local policy {self.commons['policy'].distro}")
+                f"using local policy {self.commons['policy'].os_release_name}")
             return self.commons['policy']
         host = load(cache={}, sysroot=self.opts.sysroot, init=InitSystem(),
                     probe_runtime=True,
                     remote_exec=self._transport.run_command,
                     remote_check=self.read_file('/etc/os-release'))
         if host:
-            self.log_info(f"loaded policy {host.distro} for host")
+            self.log_info(f"loaded policy {host.os_release_name} for host")
             return host
         self.log_error('Unable to determine host installation. Ignoring node')
         raise UnsupportedHostException
@@ -751,8 +772,7 @@ class SosNode():
             return 'sos report terminated unexpectedly. Check disk space'
         if len(stdout) > 0:
             return stdout.split('\n')[0:1]
-        else:
-            return f'sos exited with code {rc}'
+        return f'sos exited with code {rc}'
 
     def execute_sos_command(self):
         """Run sos report and capture the resulting file path"""
@@ -760,6 +780,21 @@ class SosNode():
         try:
             path = False
             checksum = False
+            config_file_arg = ''
+            if self.opts.node_config_file:
+                config_file_arg = f'--config-file={self.opts.node_config_file}'
+            elif self.opts.inherit_config_file:
+                if not self.local:
+                    remote_config = f"/tmp/{self.tmpdir.split('/')[-1]}.conf"
+                    self._transport.copy_file_to_remote(
+                        self.opts.config_file,
+                        remote_config)
+                    config_file_arg = f'--config-file={remote_config}'
+                else:
+                    config_file_arg = (
+                        f'--config-file={self.opts.config_file}')
+            if config_file_arg:
+                self.sos_cmd = f"{self.sos_cmd} {config_file_arg}"
             res = self.run_command(self.sos_cmd,
                                    timeout=self.opts.timeout,
                                    use_shell=True,
@@ -807,10 +842,9 @@ class SosNode():
             if self.file_exists(path):
                 self.log_info(f"Copying remote {path} to local {destdir}")
                 return self._transport.retrieve_file(path, dest)
-            else:
-                self.log_debug(f"Attempting to copy remote file {path}, but it"
-                               " does not exist on filesystem")
-                return False
+            self.log_debug(f"Attempting to copy remote file {path}, but it"
+                           " does not exist on filesystem")
+            return False
         except Exception as err:
             self.log_debug(f"Failed to retrieve {path}: {err}")
             return False
@@ -830,10 +864,9 @@ class SosNode():
                 cmd = f"rm -f {path}"
                 res = self.run_command(cmd, need_root=True)
                 return res['status'] == 0
-            else:
-                self.log_debug(f"Attempting to remove remote file {path}, but "
-                               "it does not exist on filesystem")
-                return False
+            self.log_debug(f"Attempting to remove remote file {path}, but "
+                           "it does not exist on filesystem")
+            return False
         except Exception as e:
             self.log_debug(f'Failed to remove {path}: {e}')
             return False
@@ -857,9 +890,8 @@ class SosNode():
             self.ui_msg('Successfully collected sos report')
             self.file_list.append(self.sos_path.split('/')[-1])
             return True
-        else:
-            self.ui_msg('Failed to retrieve sos report')
-            return False
+        self.ui_msg('Failed to retrieve sos report')
+        return False
 
     def remove_sos_archive(self):
         """Remove the sos report archive from the node, since we have
@@ -919,9 +951,8 @@ class SosNode():
         res = self.run_command(cmd, timeout=10, need_root=True)
         if res['status'] == 0:
             return True
-        else:
-            msg = "Exception while making %s readable. Return code was %s"
-            self.log_error(msg % (filepath, res['status']))
-            raise Exception
+        msg = "Exception while making %s readable. Return code was %s"
+        self.log_error(msg % (filepath, res['status']))
+        raise Exception
 
 # vim: set et ts=4 sw=4 :

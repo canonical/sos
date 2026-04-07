@@ -304,7 +304,7 @@ class RemoteTransport():
             out = result.before
             result.close()
             return {'status': result.exitstatus, 'output': out}
-        elif index == 1:
+        if index == 1:
             raise CommandTimeoutException(cmd)
         # if we somehow manage to flow to this point, use this bogus exit code
         # as a signal to debugging efforts that whatever went sideways did so
@@ -331,7 +331,7 @@ class RemoteTransport():
             result.sendline(self.opts.sudo_pw)
         elif index == 3:
             if not self.opts.root_password:
-                msg = ("Unable to run command as root: no root password given")
+                msg = "Unable to run command as root: no root password given"
                 self.log_error(msg)
                 raise Exception(msg)
             result.sendline(self.opts.root_password)
@@ -351,6 +351,37 @@ class RemoteTransport():
             self._hostname = self.address
         self.log_info(f"Hostname set to {self._hostname}")
         return self._hostname
+
+    def copy_file_to_remote(self, fname, dest):
+        """Copy a local file, fname, to dest on the remote node
+
+        :param fname:   The name of the file to copy
+        :type fname:    ``str``
+
+        :param dest:    Where to save the file to remotely
+        :type dest:     ``str``
+
+        :returns:   True if file was successfully copied to remote, or False
+        :rtype:     ``bool``
+        """
+        attempts = 0
+        try:
+            while attempts < 3:
+                attempts += 1
+                ret = self._copy_file_to_remote(fname, dest)
+                if ret:
+                    return True
+                self.log_info(f"File copy attempt {attempts} failed")
+            self.log_info("File copy failed after 3 attempts")
+            return False
+        except Exception as err:
+            self.log_error("Exception encountered during config copy attempt "
+                           f"{attempts} for {fname}: {err}")
+            raise err
+
+    def _copy_file_to_remote(self, fname, dest):
+        raise NotImplementedError(
+            f"Transport {self.name} does not support file copying")
 
     def retrieve_file(self, fname, dest):
         """Copy a remote file, fname, to dest on the local node
@@ -399,12 +430,11 @@ class RemoteTransport():
         res = self.run_command(f"cat {fname}", timeout=10)
         if res['status'] == 0:
             return res['output']
+        if 'No such file' in res['output']:
+            self.log_debug(f"File {fname} does not exist on node")
         else:
-            if 'No such file' in res['output']:
-                self.log_debug(f"File {fname} does not exist on node")
-            else:
-                self.log_error(f"Error reading {fname}: "
-                               f"{res['output'].split(':')[1:]}")
-            return ''
+            self.log_error(f"Error reading {fname}: "
+                           f"{res['output'].split(':')[1:]}")
+        return ''
 
 # vim: set et ts=4 sw=4 :

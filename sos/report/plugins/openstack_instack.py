@@ -21,13 +21,18 @@ NON_CONTAINERIZED_DEPLOY = [
         '/home/stack/undercloud.conf'
 ]
 CONTAINERIZED_DEPLOY = [
-        '/var/log/heat-launcher/',
+        '/etc/puppet/hieradata/',
+        '/etc/rhosp-release',
+        '/home/stack/*-deploy',
+        '/home/stack/.tripleo/history',
         '/home/stack/ansible.log',
         '/home/stack/config-download/',
         '/home/stack/install-undercloud.log',
+        '/home/stack/overcloud_install.log',
         '/home/stack/undercloud-install-*.tar.bzip2',
-        '/home/stack/.tripleo/history',
+        '/home/stack/undercloud.conf',
         '/var/lib/tripleo-config/',
+        '/var/log/heat-launcher/',
         '/var/log/tripleo-container-image-prepare.log',
 ]
 UNDERCLOUD_CONF_PATH = '/home/stack/undercloud.conf'
@@ -119,22 +124,9 @@ class OpenStackInstack(Plugin):
         # do_file_sub is case insensitive, so protected_keys can be lowercase
         # only
         protected_keys = [
-            "os_password",
-            "undercloud_admin_password",
-            "undercloud_ceilometer_metering_secret",
-            "undercloud_ceilometer_password",
-            "undercloud_ceilometer_snmpd_password",
-            "undercloud_db_password",
-            "undercloud_glance_password",
-            "undercloud_heat_password",
-            "undercloud_heat_stack_domain_admin_password",
-            "undercloud_horizon_secret_key",
-            "undercloud_ironic_password",
-            "undercloud_neutron_password",
-            "undercloud_nova_password",
-            "undercloud_rabbit_password",
-            "undercloud_swift_password",
-            "undercloud_tuskar_password",
+            ".*_password",
+            ".*_secret",
+            ".*_key",
         ]
         regexp = fr"(({'|'.join(protected_keys)})=)(.*)"
         self.do_file_sub("/home/stack/.instack/install-undercloud.log",
@@ -148,6 +140,10 @@ class OpenStackInstack(Plugin):
         self.do_file_sub('/home/stack/.tripleo/history',
                          r'(password=)\w+',
                          r'\1*********')
+
+        self.do_file_sub('/home/stack/overcloud_install.log',
+                         r'(Found key: \\".*password.*\\" value: )(\\".+?\\")',
+                         r'\1\\"*********\\"')
 
 
 class RedHatRDOManager(OpenStackInstack, RedHatPlugin):

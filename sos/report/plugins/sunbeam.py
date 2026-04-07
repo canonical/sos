@@ -10,6 +10,7 @@
 
 import json
 import pwd
+import yaml
 from sos.report.plugins import Plugin, UbuntuPlugin, PluginOpt
 
 
@@ -43,11 +44,6 @@ class Sunbeam(Plugin, UbuntuPlugin):
             '/var/snap/openstack/current/config.yaml',
         ])
 
-        self.add_cmd_output([
-            'sunbeam cluster list',
-            'sunbeam cluster list --format yaml',
-        ])
-
         sunbeam_user = self.get_option("sunbeam-user")
         try:
             user_pwd = pwd.getpwnam(sunbeam_user)
@@ -60,12 +56,48 @@ class Sunbeam(Plugin, UbuntuPlugin):
             return
 
         if user_pwd:
+            self.add_cmd_output([
+                'sunbeam cluster list',
+                'sunbeam cluster list --format yaml',
+                'sunbeam manifest list',
+                'sunbeam deployment list',
+            ], snap_cmd=True, runas=sunbeam_user)
+
+            manifest_raw = self.collect_cmd_output(
+                'sunbeam manifest list --format yaml',
+                runas=sunbeam_user
+            )
+
+            if manifest_raw['status'] == 0:
+                manifests = yaml.safe_load(manifest_raw['output'])
+                for manifest in manifests:
+                    self.add_cmd_output(
+                        f'sunbeam manifest show {manifest["manifestid"]}',
+                        snap_cmd=True, runas=sunbeam_user
+                    )
+
+            deployment_raw = self.collect_cmd_output(
+                'sunbeam deployment list --format yaml',
+                runas=sunbeam_user
+            )
+
+            if deployment_raw['status'] == 0:
+                deployments = yaml.safe_load(deployment_raw['output'])
+                for deployment in deployments['deployments']:
+                    self.add_cmd_output([
+                        f'sunbeam deployment show {deployment["name"]}',
+                        f'sunbeam deployment show {deployment["name"]} '
+                        '--format yaml',
+                    ], snap_cmd=True, runas=sunbeam_user)
+
             sb_snap_homedir = f'{user_pwd.pw_dir}/snap/openstack/common'
 
             self.add_copy_spec([
                 f"{sb_snap_homedir}/*.log",
-                f"{sb_snap_homedir}/etc/*/*.log",
+                f"{sb_snap_homedir}/etc/**/*.log",
+                f"{sb_snap_homedir}/etc/**/terraform.tfvars.json",
                 f"{sb_snap_homedir}/logs/*.log",
+                f"{sb_snap_homedir}/reports/*.yaml",
             ])
 
             if self.get_option("juju-allow-login"):
@@ -100,7 +132,7 @@ class Sunbeam(Plugin, UbuntuPlugin):
                     "login")
 
     def _get_juju_cmd_details(self, user):
-        self.add_cmd_output("juju controllers", runas=user)
+        self.add_cmd_output("juju controllers", runas=user, snap_cmd=True)
         juju_controllers = self.collect_cmd_output(
             "juju controllers --format json", runas=user)
 
@@ -113,7 +145,7 @@ class Sunbeam(Plugin, UbuntuPlugin):
                     f'juju model-defaults -c {controller}',
                     f'juju controller-config -c {controller}',
                     f'juju controller-config -c {controller} --format json',
-                ], runas=user)
+                ], runas=user, snap_cmd=True)
 
                 juju_models = self.collect_cmd_output(
                     f'juju models -c {controller} --format json',
@@ -131,7 +163,7 @@ class Sunbeam(Plugin, UbuntuPlugin):
                             f'juju status -m {model_name} --format json',
                             f'juju model-config -m {model_name}',
                             f'juju model-config -m {model_name} --format json',
-                        ], runas=user)
+                        ], runas=user, snap_cmd=True)
 
     def postproc(self):
 

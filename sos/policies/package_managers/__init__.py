@@ -69,7 +69,7 @@ class PackageManager():
 
     @property
     def manager_name(self):
-        return self.__class__.__name__.lower().split('package')[0]
+        return self.__class__.__name__.lower().split('package', maxsplit=1)[0]
 
     def exec_cmd(self, command, timeout=30, need_root=False, env=None,
                  use_shell=False, chroot=None):
@@ -137,7 +137,7 @@ class PackageManager():
         :rtype: ``list``
         """
         reg = re.compile(regex_name, flags)
-        return [pkg for pkg in self.packages.keys() if reg.match(pkg)]
+        return [pkg for pkg in self.packages if reg.match(pkg)]
 
     def pkg_by_name(self, name):
         """
@@ -274,9 +274,9 @@ class PackageManager():
         verify_packages = ""
         for package_list in verify_list:
             for package in package_list:
-                if any([f in package for f in self.verify_filter]):
+                if any(f in package for f in self.verify_filter):
                     continue
-                if len(verify_packages):
+                if verify_packages:
                     verify_packages += " "
                 verify_packages += package
         return self.verify_command + " " + verify_packages
@@ -334,6 +334,23 @@ class MultiPackageManager(PackageManager):
 
         self._managers = [self.primary]
         self._managers.extend(self.fallbacks)
+
+    def _parse_pkg_list(self, pkg_list):
+        """
+        Using the output of `query_command`, build the _packages dict.
+
+        This should be overridden by distinct package managers and be a
+        generator for _generate_pkg_list which will insert the packages into
+        the _packages dict.
+
+        This method should yield a tuple of name, version, release for each
+        package parsed. If the package manager or distribution does not use a
+        release field, set it to None.
+
+        :param pkg_list: The output of the result of `query_command`
+        :type pkg_list:  ``str``
+        """
+        raise NotImplementedError
 
     def all_files(self):
         if not self.files:

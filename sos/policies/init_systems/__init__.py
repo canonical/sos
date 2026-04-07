@@ -83,6 +83,7 @@ class InitSystem():
         """
         return name in self.services
 
+    # pylint: disable=unused-argument
     def is_running(self, name, default=True):
         """Checks if the given service name is in a running state.
 
@@ -111,7 +112,7 @@ class InitSystem():
         This must be overridden by anything that subclasses `InitSystem` in
         order for service methods to function properly
         """
-        pass
+        raise NotImplementedError
 
     def _query_service(self, name):
         """Query an individual service"""
@@ -148,7 +149,7 @@ class InitSystem():
         :type regex: ``str``
         """
         reg = re.compile(regex, re.I)
-        return [s for s in self.services.keys() if reg.match(s)]
+        return [s for s in self.services if reg.match(s)]
 
     def get_service_status(self, name):
         """Get the status for the given service name along with the output

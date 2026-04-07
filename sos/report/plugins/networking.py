@@ -8,6 +8,8 @@
 
 from sos.report.plugins import (Plugin, RedHatPlugin, UbuntuPlugin,
                                 DebianPlugin, SoSPredicate, PluginOpt)
+from sos.policies.distros.ubuntu import UbuntuPolicy
+from sos.policies.distros.debian import DebianPolicy
 
 
 class Networking(Plugin):
@@ -60,6 +62,7 @@ class Networking(Plugin):
             "/etc/network*",
             "/etc/nsswitch.conf",
             "/etc/resolv.conf",
+            "/etc/gai.conf",
             "/etc/xinetd.conf",
             "/etc/xinetd.d",
             "/etc/yp.conf",
@@ -67,6 +70,9 @@ class Networking(Plugin):
             "/sys/class/net/*/device/numa_node",
             "/sys/class/net/*/flags",
             "/sys/class/net/*/statistics/",
+            "/etc/nmstate/",
+            "/var/lib/lldpad/",
+            "/etc/services",
         ])
 
         self.add_forbidden_path([
@@ -92,6 +98,7 @@ class Networking(Plugin):
         self.add_cmd_output([
             "nstat -zas",
             "netstat -s",
+            "netstat -s -6",
             f"netstat {self.ns_wide} -agn",
             "networkctl status -a",
             "ip -6 route show table all",
@@ -109,6 +116,8 @@ class Networking(Plugin):
             "ip neigh show nud noarp",
             "biosdevname -d",
             "tc -s qdisc show",
+            "nmstatectl show",
+            "nmstatectl show --running-config",
         ])
 
         if self.path_isdir('/sys/class/devlink'):
@@ -116,13 +125,35 @@ class Networking(Plugin):
                 "devlink dev param show",
                 "devlink dev info",
                 "devlink port show",
+                "devlink sb show",
+                "devlink sb pool show",
+                "devlink sb port pool show",
+                "devlink sb tc bind show",
+                "devlink -s -v trap show",
             ])
 
             devlinks = self.collect_cmd_output("devlink dev")
             if devlinks['status'] == 0:
                 devlinks_list = devlinks['output'].splitlines()
                 for devlink in devlinks_list:
-                    self.add_cmd_output(f"devlink dev eswitch show {devlink}")
+                    self.add_cmd_output([
+                        f"devlink dev eswitch show {devlink}",
+                        f"devlink sb occupancy snapshot {devlink}",
+                        f"devlink sb occupancy show {devlink}",
+                        f"devlink -v resource show {devlink}"
+                    ])
+                    dev_tables = []
+                    dpipe = self.collect_cmd_output(
+                        f"devlink dpipe table show {devlink}"
+                    )
+                    if dpipe['status'] == 0:
+                        for tableln in dpipe['output'].splitlines():
+                            if tableln.startswith('name'):
+                                dev_tables.append(tableln.split()[1])
+                        self.add_cmd_output([
+                            f"devlink dpipe table show {devlink} name {dname}"
+                            for dname in dev_tables
+                        ])
 
         # below commands require some kernel module(s) to be loaded
         # run them only if the modules are loaded, or if explicitly requested
@@ -169,6 +200,7 @@ class Networking(Plugin):
                                required={'kmods': 'all'})
         self.add_cmd_output(ss_cmd, pred=ss_pred, changes=True)
 
+        self.add_cmd_output("ss -s")
         # Get ethtool output for every device that does not exist in a
         # namespace.
         _ecmds = [f"ethtool -{opt}" for opt in self.ethtool_shortopts]
@@ -181,6 +213,8 @@ class Networking(Plugin):
             "ethtool --phy-statistics %(dev)s",
             "ethtool --show-priv-flags %(dev)s",
             "ethtool --show-eee %(dev)s",
+            "ethtool --show-fec %(dev)s",
+            "ethtool --show-ntuple %(dev)s",
             "tc -s filter show dev %(dev)s",
             "tc -s filter show dev %(dev)s ingress",
         ], devices="ethernet")
@@ -225,17 +259,17 @@ class Networking(Plugin):
                 _subdir = f"namespaces/{namespace}"
                 ns_cmd_prefix = cmd_prefix + namespace + " "
                 self.add_cmd_output([
-                    ns_cmd_prefix + "ip -d address show",
-                    ns_cmd_prefix + "ip route show table all",
-                    ns_cmd_prefix + "ip -s -s neigh show",
-                    ns_cmd_prefix + "ip -4 rule list",
-                    ns_cmd_prefix + "ip -6 rule list",
-                    ns_cmd_prefix + "ip vrf show",
-                    ns_cmd_prefix + "sysctl -a",
-                    ns_cmd_prefix + f"netstat {self.ns_wide} -neopa",
-                    ns_cmd_prefix + "netstat -s",
-                    ns_cmd_prefix + f"netstat {self.ns_wide} -agn",
-                    ns_cmd_prefix + "nstat -zas",
+                    f"{ns_cmd_prefix} ip -d address show",
+                    f"{ns_cmd_prefix} ip route show table all",
+                    f"{ns_cmd_prefix} ip -s -s neigh show",
+                    f"{ns_cmd_prefix} ip -4 rule list",
+                    f"{ns_cmd_prefix} ip -6 rule list",
+                    f"{ns_cmd_prefix} ip vrf show",
+                    f"{ns_cmd_prefix} sysctl -a",
+                    f"{ns_cmd_prefix} netstat {self.ns_wide} -neopa",
+                    f"{ns_cmd_prefix} netstat -s",
+                    f"{ns_cmd_prefix} netstat {self.ns_wide} -agn",
+                    f"{ns_cmd_prefix} nstat -zas",
                 ], priority=50, subdir=_subdir)
                 self.add_cmd_output([ns_cmd_prefix + "iptables-save"],
                                     pred=iptables_with_nft,
@@ -258,10 +292,11 @@ class Networking(Plugin):
                     # Devices that exist in a namespace use less ethtool
                     # parameters. Run this per namespace.
                     self.add_device_cmd([
-                        ns_cmd_prefix + "ethtool %(dev)s",
-                        ns_cmd_prefix + "ethtool -i %(dev)s",
-                        ns_cmd_prefix + "ethtool -k %(dev)s",
-                        ns_cmd_prefix + "ethtool -S %(dev)s"
+                        f"{ns_cmd_prefix} ethtool %(dev)s",
+                        f"{ns_cmd_prefix} ethtool -i %(dev)s",
+                        f"{ns_cmd_prefix} ethtool -k %(dev)s",
+                        f"{ns_cmd_prefix} ethtool -S %(dev)s",
+                        f"{ns_cmd_prefix} ethtool -m %(dev)s"
                     ], devices=_devs['ethernet'], priority=50, subdir=_subdir)
 
         self.add_command_tags()
@@ -283,20 +318,30 @@ class RedHatNetworking(Networking, RedHatPlugin):
 
         super().setup()
 
+    def postproc(self):
+
+        self.do_path_regex_sub(
+            "/etc/nmstate",
+            r"(\s+(mka-cak|private-key-password|psk|password):).*",
+            r"\1 ******"
+        )
+
 
 class UbuntuNetworking(Networking, UbuntuPlugin, DebianPlugin):
     trace_host = "archive.ubuntu.com"
 
     def setup(self):
 
-        ubuntu_jammy_and_after_ss_kmods = ['tcp_diag', 'udp_diag',
-                                           'inet_diag', 'unix_diag',
-                                           'netlink_diag', 'af_packet_diag',
-                                           'xsk_diag', 'mptcp_diag',
-                                           'raw_diag']
+        common_ss_kmods = ['af_packet_diag', 'inet_diag', 'mptcp_diag',
+                           'netlink_diag', 'raw_diag', 'tcp_diag', 'udp_diag',
+                           'unix_diag']
 
-        if self.policy.dist_version() >= 22.04:
-            self.ss_kmods = ubuntu_jammy_and_after_ss_kmods
+        if (isinstance(self.policy, UbuntuPolicy) and
+                self.policy.dist_version() >= 22.04):
+            self.ss_kmods = common_ss_kmods + ['xsk_diag']
+        elif (isinstance(self.policy, DebianPolicy) and
+                self.policy.dist_version() >= 13):
+            self.ss_kmods = common_ss_kmods + ['vsock_diag']
 
         super().setup()
 
@@ -309,6 +354,14 @@ class UbuntuNetworking(Networking, UbuntuPlugin, DebianPlugin):
             "/lib/netplan/*.yaml",
             "/run/netplan/*.yaml",
             "/run/systemd/network"
+        ])
+
+        # Netplan only consumes files with the `.yaml` extension (LP#1815734),
+        # so give visibility on other files that might be present.
+        self.add_dir_listing([
+            "/etc/netplan",
+            "/lib/netplan",
+            "/run/netplan",
         ])
 
     def postproc(self):

@@ -10,8 +10,7 @@ sos \- A unified tool for collecting system logs and other debug information
 support representatives, and the like to assist in troubleshooting issues with
 a system or group of systems.
 
-The most well known function is \fB sos report\fR or \fBsos report\fR as it was
-previously known.
+The most well known function is \fBsos report\fR.
 
 An sos archive is typically requested by support organizations to collect baseline
 configuration and system data from which to begin the troubleshooting process.
@@ -31,7 +30,7 @@ services, or system architecture is detected.
 
 See \fBsos report --help\fR and \fBman sos-report\fR for more information.
 
-May also be invoked via the alias \fBrep\fR or the deprecated command \fBsos report\fR.
+May also be invoked via the alias \fBrep\fR.
 
 .TP
 .B collect
@@ -74,6 +73,14 @@ commands and components than is directly available in either other manpages or
 --help output.
 
 See \fB sos help --help\fR and \fB man sos-help\fR for more information.
+
+.TP
+.B upload
+This subcommand uploads an input file to either a distribution-defined or a
+user-defined target. The file can be an SOS archive or any other type of file,
+such as a vmcore or log file.
+
+See \fB sos upload --help\fR and \fB man sos-upload\fR for more information.
 
 .SH GLOBAL OPTIONS
 sos components provide their own set of options, however the following are available
@@ -156,8 +163,9 @@ The following table summarizes the effects of different verbosity levels:
 .B \-q, \--quiet
 Only log fatal errors to stderr.
 .TP
-.B \-z, \-\-compression-type {auto|xz|gzip}
-Compression type to use when compression the final archive output
+.B \-z, \-\-compression-type {auto|xz|gzip|none}
+Compression type to use when compressing the final archive output. If the value \fBnone\fP is given
+the tar archive will be written directly with no compression.
 .TP
 .B \--help
 Display usage message.
@@ -165,7 +173,7 @@ Display usage message.
 .BR sos.conf (5)
 .SH MAINTAINER
 .nf
-Maintained on GitHub at https://github.com/sos report/sos
+Maintained on GitHub at https://github.com/sosreport/sos
 .fi
 .SH AUTHORS & CONTRIBUTORS
 See \fBAUTHORS\fR file in the package documentation.
