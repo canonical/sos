@@ -1,0 +1,83 @@
+name: Upstream Avocado Tests
+
+on:
+  workflow_call:
+    inputs:
+      distro:
+        required: true
+        type: string
+      pytestpath:
+        required: false
+        type: string
+        default: "."
+      test_command:
+        required: true
+        type: string
+      stage_name:
+        required: true
+        type: string
+
+jobs:
+  test:
+    name: ${{ inputs.stage_name }} Tests (${{ inputs.distro }})
+    runs-on: "ubuntu-${{ inputs.distro }}"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          path: sos
+
+      - name: Install functional test dependancies
+        run: |
+          # Install dependancies for running the tests, primarily avocado
+          sudo apt -y install python3-pip
+          python3 -m venv --system-site-packages avocado
+          source avocado/bin/activate
+          pip3 install -r sos/test-requirements.txt
+
+      - name: Download Distro-Specific DEB
+        uses: actions/download-artifact@v4
+        with:
+          name: sos-${{ inputs.distro }}.deb
+
+      - name: Install the package
+        run: |
+          # Install the local deb file
+          [[ "$(dpkg -l sos)" ]] && sudo apt -y purge sos ubuntu-server
+          [[ "$(dpkg -l sosreport)" ]] && sudo apt -y purge sosreport ubuntu-server
+          sudo dpkg -i "sos-${{ inputs.distro }}.deb" || sudo apt-get install -f -y
+
+      - name: Run Test Command
+        working-directory: ./sos
+        run: |
+          sudo PYTHONPATH=${{ inputs.pytestpath }} ../avocado/bin/${{ inputs.test_command }}
+
+      - name: Prepare Root Logs for Upload
+        if: failure()
+        run: |
+          # 1. Create a temporary directory in the workspace
+          mkdir -p ./debug-logs/{var-tmp,root-home}
+
+          # 2. Use sudo to copy the protected directories
+          sudo cp -ra /var/tmp/avocado* ./debug-logs/var-tmp || true
+          sudo cp -ra /root/avocado ./debug-logs/root-home || true
+
+          # 3. Change ownership so the 'ubuntu' user can read them
+          sudo chown -R $USER:$USER ./debug-logs
+
+      - name: Upload Distro Artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-${{ inputs.distro }}-${{ inputs.stage_name }}
+          path: ./debug-logs/
+          retention-days: 7
+
+      - name: Post-Test Cleanup
+        if: always()
+        run: |
+          # Clean up the downloaded deb and the synced tests repo
+          rm -f *.deb
+          # Optional: Uninstall the package to leave the runner clean
+          sudo apt-get purge -y sos

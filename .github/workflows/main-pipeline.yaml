@@ -1,0 +1,67 @@
+name: Main Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      distros: ${{ steps.set-matrix.outputs.distros }}
+    steps:
+      - id: set-matrix
+        # Edit this list to add/remove distros for the ENTIRE pipeline
+        run: echo "distros=[22.04, 24.04]" >> $GITHUB_OUTPUT
+
+  build:
+    needs: setup
+    strategy:
+      matrix:
+        distro: ${{ fromJson(needs.setup.outputs.distros) }}
+    uses: ./.github/workflows/build-deb.yaml
+    with:
+      distro: ${{ matrix.distro }}
+
+  unit-tests:
+    needs: [setup, build]
+    strategy:
+      matrix:
+        distro: ${{ fromJson(needs.setup.outputs.distros) }}
+    uses: ./.github/workflows/stage-tests.yaml
+    with:
+      distro: ${{ matrix.distro }}
+      test_command: "avocado run tests/unittests/"
+      stage_name: "Unit"
+
+  stage-one:
+    needs: [setup, build]
+    strategy:
+      matrix:
+        distro: ${{ fromJson(needs.setup.outputs.distros) }}
+    uses: ./.github/workflows/stage-tests.yaml
+    with:
+      distro: ${{ matrix.distro }}
+      pytestpath: "tests/"
+      test_command: "avocado run -p TESTLOCAL=true --max-parallel-tasks=1 -t stageone tests/{cleaner,collect,report,vendor}_tests"
+      stage_name: "Stage One"
+    secrets: inherit
+
+  stage-two:
+    needs: [setup, build]
+    strategy:
+      matrix:
+        distro: ${{ fromJson(needs.setup.outputs.distros) }}
+    uses: ./.github/workflows/stage-tests.yaml
+    with:
+      distro: ${{ matrix.distro }}
+      pytestpath: "tests/"
+      test_command: "avocado run -p TESTLOCAL=true --max-parallel-tasks=1 -t stagetwo tests/{cleaner,collect,report,vendor}_tests"
+      stage_name: "Stage Two"
+    secrets: inherit
