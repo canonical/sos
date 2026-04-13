@@ -6,11 +6,7 @@ on:
       distro:
         required: true
         type: string
-      pytestpath:
-        required: false
-        type: string
-        default: "."
-      test_command:
+      test_name:
         required: true
         type: string
       stage_name:
@@ -30,11 +26,8 @@ jobs:
 
       - name: Install functional test dependancies
         run: |
-          # Install dependancies for running the tests, primarily avocado
-          sudo apt -y install python3-pip
-          python3 -m venv --system-site-packages avocado
-          source avocado/bin/activate
-          pip3 install -r sos/test-requirements.txt
+          sudo apt update
+          sudo apt -y install tox
 
       - name: Download Distro-Specific DEB
         uses: actions/download-artifact@v4
@@ -51,7 +44,7 @@ jobs:
       - name: Run Test Command
         working-directory: ./sos
         run: |
-          sudo PYTHONPATH=${{ inputs.pytestpath }} ../avocado/bin/${{ inputs.test_command }}
+          sudo tox -e ${{ inputs.test_name }}
 
       - name: Prepare Root Logs for Upload
         if: failure()
