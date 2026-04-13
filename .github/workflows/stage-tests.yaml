@@ -6,6 +6,9 @@ on:
       distro:
         required: true
         type: string
+      build:
+        required: true
+        type: string
       test_name:
         required: true
         type: string
@@ -34,12 +37,21 @@ jobs:
         with:
           name: sos-${{ inputs.distro }}.deb
 
+      - name: Download snap
+        uses: actions/download-artifact@v4
+        with:
+          name: sos-build.snap
+
       - name: Install the package
         run: |
-          # Install the local deb file
+          # Install the local deb or snap file
           [[ "$(dpkg -l sos)" ]] && sudo apt -y purge sos ubuntu-server
           [[ "$(dpkg -l sosreport)" ]] && sudo apt -y purge sosreport ubuntu-server
-          sudo dpkg -i "sos-${{ inputs.distro }}.deb" || sudo apt-get install -f -y
+          if [[ "${{ inputs.build }}" == "deb" ]] ; then
+            sudo apt -y install ./"sos-${{ inputs.distro }}.deb"
+          elif [[ "${{ inputs.build }}" == "snap" ]] ; then
+            sudo snap install "sos-build.snap" --classic --dangerous
+          fi
 
       - name: Run Test Command
         working-directory: ./sos
@@ -49,14 +61,17 @@ jobs:
       - name: Prepare Root Logs for Upload
         if: failure()
         run: |
-          # 1. Create a temporary directory in the workspace
+          # 1. Check what's in the current directory
+          ls -lh
+
+          # 2. Create a temporary directory in the workspace
           mkdir -p ./debug-logs/{var-tmp,root-home}
 
-          # 2. Use sudo to copy the protected directories
+          # 3. Use sudo to copy the protected directories
           sudo cp -ra /var/tmp/avocado* ./debug-logs/var-tmp || true
           sudo cp -ra /root/avocado ./debug-logs/root-home || true
 
-          # 3. Change ownership so the 'ubuntu' user can read them
+          # 4. Change ownership so the 'ubuntu' user can read them
           sudo chown -R $USER:$USER ./debug-logs
 
       - name: Upload Distro Artifact
@@ -71,6 +86,7 @@ jobs:
         if: always()
         run: |
           # Clean up the downloaded deb and the synced tests repo
-          rm -f *.deb
+          rm -f *.deb *.snap
           # Optional: Uninstall the package to leave the runner clean
           sudo apt-get purge -y sos
+          sudo snap remove sosreport

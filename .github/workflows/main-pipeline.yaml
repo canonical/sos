@@ -19,12 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       distros: ${{ steps.set-matrix.outputs.distros }}
+      builds: ${{ steps.set-matrix.outputs.builds }}
     steps:
       - id: set-matrix
         # Edit this list to add/remove distros for the ENTIRE pipeline
-        run: echo "distros=[22.04, 24.04]" >> $GITHUB_OUTPUT
+        run: |
+          echo "distros=[\"22.04\", \"24.04\"]" >> $GITHUB_OUTPUT
+          echo "builds=[\"deb\", \"snap\"]" >> $GITHUB_OUTPUT
 
-  build:
+  build_deb:
     needs: setup
     strategy:
       matrix:
@@ -32,6 +35,10 @@ jobs:
     uses: ./.github/workflows/build-deb.yaml
     with:
       distro: ${{ matrix.distro }}
+
+  build_snap:
+    needs: setup
+    uses: ./.github/workflows/build-snap.yaml
 
   flake8:
     uses: ./.github/workflows/tox.yaml
@@ -44,36 +51,42 @@ jobs:
       test_name: pylint
 
   unit:
-    needs: [setup, build]
+    needs: [setup, build_deb, build_snap]
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
+        build: ${{ fromJson(needs.setup.outputs.builds) }}
     uses: ./.github/workflows/stage-tests.yaml
     with:
       distro: ${{ matrix.distro }}
+      build: ${{ matrix.build }}
       test_name: "unit_tests"
       stage_name: "Unit"
 
   stage_one:
-    needs: [setup, build]
+    needs: [setup, build_deb, build_snap]
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
+        build: ${{ fromJson(needs.setup.outputs.builds) }}
     uses: ./.github/workflows/stage-tests.yaml
     with:
       distro: ${{ matrix.distro }}
+      build: ${{ matrix.build }}
       test_name: "stageone_tests"
       stage_name: "Stage One"
     secrets: inherit
 
   stage_two:
-    needs: [setup, build]
+    needs: [setup, build_deb, build_snap]
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
+        build: ${{ fromJson(needs.setup.outputs.builds) }}
     uses: ./.github/workflows/stage-tests.yaml
     with:
       distro: ${{ matrix.distro }}
+      build: ${{ matrix.build }}
       test_name: "stagetwo_tests"
       stage_name: "Stage Two"
     secrets: inherit
