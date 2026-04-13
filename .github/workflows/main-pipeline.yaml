@@ -33,7 +33,17 @@ jobs:
     with:
       distro: ${{ matrix.distro }}
 
-  unit-tests:
+  flake8:
+    uses: ./.github/workflows/tox.yaml
+    with:
+      test_name: flake8
+
+  pylint:
+    uses: ./.github/workflows/tox.yaml
+    with:
+      test_name: pylint
+
+  unit:
     needs: [setup, build]
     strategy:
       matrix:
@@ -41,10 +51,10 @@ jobs:
     uses: ./.github/workflows/stage-tests.yaml
     with:
       distro: ${{ matrix.distro }}
-      test_command: "avocado run tests/unittests/"
+      test_name: "unit_tests"
       stage_name: "Unit"
 
-  stage-one:
+  stage_one:
     needs: [setup, build]
     strategy:
       matrix:
@@ -52,12 +62,11 @@ jobs:
     uses: ./.github/workflows/stage-tests.yaml
     with:
       distro: ${{ matrix.distro }}
-      pytestpath: "tests/"
-      test_command: "avocado run -p TESTLOCAL=true --max-parallel-tasks=1 -t stageone tests/{cleaner,collect,report,vendor}_tests"
+      test_name: "stageone_tests"
       stage_name: "Stage One"
     secrets: inherit
 
-  stage-two:
+  stage_two:
     needs: [setup, build]
     strategy:
       matrix:
@@ -65,7 +74,6 @@ jobs:
     uses: ./.github/workflows/stage-tests.yaml
     with:
       distro: ${{ matrix.distro }}
-      pytestpath: "tests/"
-      test_command: "avocado run -p TESTLOCAL=true --max-parallel-tasks=1 -t stagetwo tests/{cleaner,collect,report,vendor}_tests"
+      test_name: "stagetwo_tests"
       stage_name: "Stage Two"
     secrets: inherit
