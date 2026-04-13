@@ -15,11 +15,24 @@ on:
       stage_name:
         required: true
         type: string
+      extra_script:
+        required: false
+        type: string
+      foreman_ver:
+        required: false
+        type: string
+      katello_ver:
+        required: false
+        type: string
 
 jobs:
   test:
     name: ${{ inputs.stage_name }} Tests (${{ inputs.distro }})
     runs-on: "ubuntu-${{ inputs.distro }}"
+
+    env:
+      FOREMAN_VER: ${{ inputs.foreman_ver }}
+      KATELLO_VER: ${{ inputs.katello_ver }}
 
     steps:
       - name: Checkout code
@@ -33,11 +46,13 @@ jobs:
           sudo apt -y install tox
 
       - name: Download Distro-Specific DEB
+        if: ${{ inputs.build == 'deb' }}
         uses: actions/download-artifact@v4
         with:
           name: sos-${{ inputs.distro }}.deb
 
       - name: Download snap
+        if: ${{ inputs.build == 'snap' }}
         uses: actions/download-artifact@v4
         with:
           name: sos-build.snap
@@ -52,6 +67,12 @@ jobs:
           elif [[ "${{ inputs.build }}" == "snap" ]] ; then
             sudo snap install "sos-build.snap" --classic --dangerous
           fi
+
+      - name: Run Extra script
+        if: ${{ inputs.extra_script != '' }}
+        working-directory: ./sos
+        run: |
+          sudo -E ${{ inputs.extra_script}}
 
       - name: Run Test Command
         working-directory: ./sos

@@ -27,6 +27,37 @@ jobs:
           echo "distros=[\"22.04\", \"24.04\"]" >> $GITHUB_OUTPUT
           echo "builds=[\"deb\", \"snap\"]" >> $GITHUB_OUTPUT
 
+  filters:
+    runs-on: ubuntu-latest
+    outputs:
+      manpage: ${{ steps.filter.outputs.manpage }}
+      foreman: ${{ steps.filter.outputs.foreman }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            foreman:
+              - '.github/workflows/**'
+              - '**/__init__.py'
+              - '**/apache.py'
+              - '**/foreman_tests.py'
+              - '**/candlepin.py'
+              - '**/pulp.py'
+              - '**/pulpcore.py'
+              - '**/foreman_setup.sh'
+            manpage:
+              - '!man/**'
+
+  py_tests:
+    strategy:
+      matrix:
+        py_version: [ '3.9', '3.14' ]
+    uses: ./.github/workflows/py-tests.yaml
+    with:
+      py_version: ${{ matrix.py_version }}
+
   build_deb:
     needs: setup
     strategy:
@@ -89,4 +120,22 @@ jobs:
       build: ${{ matrix.build }}
       test_name: "stagetwo_tests"
       stage_name: "Stage Two"
+    secrets: inherit
+
+  foreman:
+    needs: [setup, filters, build_deb]
+    if: needs.filters.outputs.foreman == 'true'
+    strategy:
+      matrix:
+        distro: [ "22.04" ]
+        build: [ "deb" ]
+    uses: ./.github/workflows/stage-tests.yaml
+    with:
+      distro: ${{ matrix.distro }}
+      build: ${{ matrix.build }}
+      extra_script: ./tests/test_data/foreman_setup.sh
+      test_name: "foreman_tests"
+      stage_name: "Foreman"
+      foreman_ver: "3.15"
+      katello_ver: "4.17"
     secrets: inherit
