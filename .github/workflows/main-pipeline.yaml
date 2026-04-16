@@ -27,7 +27,7 @@ jobs:
   filters:
     runs-on: ubuntu-latest
     outputs:
-      manpage: ${{ steps.filter.outputs.manpage }}
+      docs: ${{ steps.filter.outputs.docs }}
       foreman: ${{ steps.filter.outputs.foreman }}
     steps:
       - uses: actions/checkout@v6
@@ -44,10 +44,12 @@ jobs:
               - '**/pulp.py'
               - '**/pulpcore.py'
               - '**/foreman_setup.sh'
-            manpage:
+            docs:
               - '!man/**'
+              - '!docs/**'
 
   py_tests:
+    if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
         py_version: [ '3.9', '3.14' ]
@@ -57,6 +59,7 @@ jobs:
 
   build_deb:
     needs: setup
+    if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
@@ -66,20 +69,24 @@ jobs:
 
   build_snap:
     needs: setup
+    if: needs.filters.outputs.docs == 'true'
     uses: ./.github/workflows/build-snap.yaml
 
   flake8:
+    if: needs.filters.outputs.docs == 'true'
     uses: ./.github/workflows/tox.yaml
     with:
       test_name: flake8
 
   pylint:
+    if: needs.filters.outputs.docs == 'true'
     uses: ./.github/workflows/tox.yaml
     with:
       test_name: pylint
 
   unit:
     needs: [setup, build_deb, build_snap]
+    if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
@@ -93,6 +100,7 @@ jobs:
 
   stage_one:
     needs: [setup, build_deb, build_snap]
+    if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
@@ -107,6 +115,7 @@ jobs:
 
   stage_two:
     needs: [setup, build_deb, build_snap]
+    if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
