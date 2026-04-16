@@ -128,6 +128,7 @@ class DebianMysql(Mysql, DebianPlugin, UbuntuPlugin):
         'mariadb-server.*',
         'mariadb-common',
         'percona-xtradb-cluster-server-.*',
+        'mysql-router',
     )
 
     my_cnf_dir = "/etc/mysql/"
