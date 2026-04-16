@@ -9,7 +9,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build Snap
         uses: snapcore/action-build@v1
@@ -29,7 +29,7 @@ jobs:
           sudo sos help
 
       - name: Upload snap Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sos-build.snap
           path: sos-build.snap

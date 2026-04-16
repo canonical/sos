@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: sos
 
@@ -47,13 +47,13 @@ jobs:
 
       - name: Download Distro-Specific DEB
         if: ${{ inputs.build == 'deb' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sos-${{ inputs.distro }}.deb
 
       - name: Download snap
         if: ${{ inputs.build == 'snap' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sos-build.snap
 
@@ -97,7 +97,7 @@ jobs:
 
       - name: Upload Distro Artifact
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: failure-logs-${{ inputs.distro }}-${{ inputs.stage_name }}
           path: ./debug-logs/
