@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: sos
 
@@ -31,7 +31,7 @@ jobs:
           mv ../*.deb ../sos-${{ inputs.distro }}.deb
 
       - name: Upload Distro Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sos-${{ inputs.distro }}.deb
           path: sos-${{ inputs.distro }}.deb
