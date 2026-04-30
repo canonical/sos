@@ -45,10 +45,13 @@ jobs:
               - '**/pulpcore.py'
               - '**/foreman_setup.sh'
             docs:
+              - '**'
               - '!man/**'
               - '!docs/**'
+              - '!po/**'
 
   py_tests:
+    needs: filters
     if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
@@ -58,7 +61,7 @@ jobs:
       py_version: ${{ matrix.py_version }}
 
   build_deb:
-    needs: setup
+    needs: [filters, setup]
     if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
@@ -68,24 +71,26 @@ jobs:
       distro: ${{ matrix.distro }}
 
   build_snap:
-    needs: setup
+    needs: [filters, setup]
     if: needs.filters.outputs.docs == 'true'
     uses: ./.github/workflows/build-snap.yaml
 
   flake8:
+    needs: filters
     if: needs.filters.outputs.docs == 'true'
     uses: ./.github/workflows/tox.yaml
     with:
       test_name: flake8
 
   pylint:
+    needs: filters
     if: needs.filters.outputs.docs == 'true'
     uses: ./.github/workflows/tox.yaml
     with:
       test_name: pylint
 
   unit:
-    needs: [setup, build_deb, build_snap]
+    needs: [filters, setup, build_deb, build_snap]
     if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
@@ -99,7 +104,7 @@ jobs:
       stage_name: "Unit"
 
   stage_one:
-    needs: [setup, build_deb, build_snap]
+    needs: [filters, setup, build_deb, build_snap, unit]
     if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
@@ -114,7 +119,7 @@ jobs:
     secrets: inherit
 
   stage_two:
-    needs: [setup, build_deb, build_snap]
+    needs: [filters, setup, build_deb, build_snap, stage_one]
     if: needs.filters.outputs.docs == 'true'
     strategy:
       matrix:
@@ -129,7 +134,7 @@ jobs:
     secrets: inherit
 
   foreman:
-    needs: [setup, filters, build_deb]
+    needs: [filters, setup, build_deb, stage_two]
     if: needs.filters.outputs.foreman == 'true'
     strategy:
       matrix:
