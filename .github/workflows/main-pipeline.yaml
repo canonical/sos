@@ -21,7 +21,7 @@ jobs:
       - id: set-matrix
         # Edit this list to add/remove distros for the ENTIRE pipeline
         run: |
-          echo "distros=[\"22.04\", \"24.04\"]" >> $GITHUB_OUTPUT
+          echo "distros=[\"22.04\", \"24.04\", \"26.04\"]" >> $GITHUB_OUTPUT
           echo "builds=[\"deb\", \"snap\"]" >> $GITHUB_OUTPUT
 
   filters:
