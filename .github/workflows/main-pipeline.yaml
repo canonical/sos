@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       foreman: ${{ steps.filter_foreman.outputs.foreman }}
+      sunbeam: ${{ steps.filter_sunbeam.outputs.sunbeam }}
       docs_count: ${{ steps.filter_docs.outputs.doc_files_count }}
       all_count: ${{ steps.filter_docs.outputs.all_files_count }}
     steps:
@@ -87,6 +88,20 @@ jobs:
               - '**/*.md'
               - 'AUTHORS'
               - 'LICENSE'
+
+      - uses: dorny/paths-filter@v4
+        id: filter_sunbeam
+        with:
+          filters: |
+            sunbeam:
+              - '.github/workflows/**'
+              - '**/__init__.py'
+              - '**/sunbeam.py'
+              - '**/sunbeam_hypervisor.py'
+              - '**/juju.py'
+              - '**/kubernetes.py'
+              - '**/ovn_host.py'
+              - '**/sunbeam_setup.sh'
 
   py_tests:
     needs: filters
@@ -201,5 +216,25 @@ jobs:
       stage_name: "Foreman"
       foreman_ver: "3.15"
       katello_ver: "4.17"
+      can_fail: true
+    secrets: inherit
+
+  sunbeam:
+    needs: [filters, setup, build_deb, stage_two]
+    if: needs.filters.outputs.sunbeam == 'true'
+    strategy:
+      matrix:
+        distro: [ 'noble' ]
+    uses: ./.github/workflows/avocado.yaml
+    with:
+      runs_on: "['self-hosted', 'linux', 'amd64', ${{ matrix.distro }}, 'xlarge-extra']"
+      distro_image: ""
+      distro_name: 'ubuntu-22.04'
+      builds: "[ 'deb' ]"
+      extra_script: ./tests/test_data/sunbeam_setup.sh
+      needs_test_repo: true
+      test_name: "sunbeam_tests"
+      stage_name: "Sunbeam"
+      sunbeam_ver: "2024.1/stable"
       can_fail: true
     secrets: inherit
