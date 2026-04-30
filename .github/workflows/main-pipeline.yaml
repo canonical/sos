@@ -44,6 +44,15 @@ jobs:
               - '**/pulp.py'
               - '**/pulpcore.py'
               - '**/foreman_setup.sh'
+            sunbeam:
+              - '.github/workflows/**'
+              - '**/__init__.py'
+              - '**/sunbeam.py'
+              - '**/sunbeam_hypervisor.py'
+              - '**/juju.py'
+              - '**/kubernetes.py'
+              - '**/ovn_host.py'
+              - '**/sunbeam_setup.sh'
             docs:
               - '!man/**'
               - '!docs/**'
@@ -144,4 +153,23 @@ jobs:
       stage_name: "Foreman"
       foreman_ver: "3.15"
       katello_ver: "4.17"
+    secrets: inherit
+
+  sunbeam:
+    needs: [setup, filters, build_deb]
+    if: needs.filters.outputs.sunbeam == 'true'
+    strategy:
+      matrix:
+        distro: [ 'noble' ]
+        build: [ "deb" ]
+    uses: ./.github/workflows/stage-tests.yaml
+    with:
+      runs_on: ['self-hosted', 'linux', 'amd64', ${{ matrix.distro }}, 'xlarge-extra']
+      distro: ${{ matrix.distro }}
+      build: ${{ matrix.build }}
+      extra_script: ./tests/test_data/sunbeam_setup.sh
+      needs_test_repo: true
+      test_name: "sunbeam_tests"
+      stage_name: "Sunbeam"
+      sunbeam_ver: "2024.1/stable"
     secrets: inherit

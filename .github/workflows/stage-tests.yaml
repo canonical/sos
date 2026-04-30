@@ -18,27 +18,46 @@ on:
       extra_script:
         required: false
         type: string
+      runs_on:
+        required: false
+        type: string
+      needs_test_repo:
+        required: false
+        type: boolean
+        default: false
       foreman_ver:
         required: false
         type: string
       katello_ver:
         required: false
         type: string
+      sunbeam_ver:
+        required: false
+        type: string
 
 jobs:
   test:
     name: ${{ inputs.stage_name }} Tests (${{ inputs.distro }})
-    runs-on: "ubuntu-${{ inputs.distro }}"
+    runs-on: ${{ inputs.runs_on == '' && format('ubuntu-{0}', inputs.distro) || inputs.runs_on }}
 
     env:
       FOREMAN_VER: ${{ inputs.foreman_ver }}
       KATELLO_VER: ${{ inputs.katello_ver }}
+      SUNBEAM_VER: ${{ inputs.sunbeam_ver }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
           path: sos
+
+      - name: Checkout Tests Repo
+        if: ${{ inputs.needs_test_repo }}
+        uses: actions/checkout@v6
+        with:
+          repository: canonical/sos_testing
+          token: ${{ secrets.GH_PAT }}
+          path: sos_testing
 
       - name: Install functional test dependancies
         run: |
