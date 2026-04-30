@@ -119,7 +119,7 @@ class RpmPackageManagerTests(unittest.TestCase):
         self.assertNotEqual(self.pm.packages, {})
 
     def test_pkg_is_formatted(self):
-        kpkg = self.pm.pkg_by_name('coreutils')
+        kpkg = self.pm.pkg_by_name('grep')
         self.assertIsInstance(kpkg, dict)
         self.assertIsInstance(kpkg['version'], list)
         self.assertEqual(kpkg['pkg_manager'], 'rpm')
@@ -136,7 +136,7 @@ class DpkgPackageManagerTests(unittest.TestCase):
         self.assertNotEqual(self.pm.packages, {})
 
     def test_pkg_is_formatted(self):
-        kpkg = self.pm.pkg_by_name('coreutils')
+        kpkg = self.pm.pkg_by_name('grep')
         self.assertIsInstance(kpkg, dict)
         self.assertIsInstance(kpkg['version'], list)
         self.assertEqual(kpkg['pkg_manager'], 'dpkg')
@@ -152,7 +152,7 @@ class MultiPackageManagerTests(unittest.TestCase):
         self.assertNotEqual(self.pm.packages, {})
 
     def test_pkg_is_formatted(self):
-        kpkg = self.pm.pkg_by_name('coreutils')
+        kpkg = self.pm.pkg_by_name('grep')
         self.assertIsInstance(kpkg, dict)
         self.assertIsInstance(kpkg['version'], list)
         _local = distro.detect().name
