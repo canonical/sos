@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SUCCESS=0
-EXTRA_OPTS=""
+EXTRA_OPTS="-l DEBUG"
 puppet_ver=8
 
 if grep -iq centos /etc/os-release; then
