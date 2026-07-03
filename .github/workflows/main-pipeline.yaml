@@ -39,8 +39,9 @@ jobs:
   filters:
     runs-on: ubuntu-latest
     outputs:
-      docs: ${{ steps.filter.outputs.docs }}
-      foreman: ${{ steps.filter.outputs.foreman }}
+      foreman: ${{ steps.filter_foreman.outputs.foreman }}
+      docs_count: ${{ steps.filter_docs.outputs.doc_files_count }}
+      all_count: ${{ steps.filter_docs.outputs.all_files_count }}
     steps:
       - uses: actions/checkout@v6
 
@@ -61,20 +62,20 @@ jobs:
       - uses: dorny/paths-filter@v4
         id: filter_docs
         with:
-          predicate-quantifier: 'every'
           filters: |
-            docs:
+            all_files:
               - '**'
-              - '!man/**'
-              - '!docs/**'
-              - '!po/**'
-              - '!**/*.md'
-              - '!AUTHORS'
-              - '!LICENSE'
+            doc_files:
+              - 'man/**'
+              - 'docs/**'
+              - 'po/**'
+              - '**/*.md'
+              - 'AUTHORS'
+              - 'LICENSE'
 
   py_tests:
     needs: filters
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         py_version: [ '3.9', '3.x' ]
@@ -84,7 +85,7 @@ jobs:
 
   build_deb:
     needs: [filters, setup]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
@@ -94,7 +95,7 @@ jobs:
 
   build_rpm:
     needs: [filters, setup]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.rpm_matrix) }}
@@ -107,26 +108,26 @@ jobs:
 
   build_snap:
     needs: [filters, setup]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     uses: ./.github/workflows/build-snap.yaml
 
   flake8:
     needs: filters
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     uses: ./.github/workflows/tox.yaml
     with:
       test_name: flake8
 
   pylint:
     needs: filters
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     uses: ./.github/workflows/tox.yaml
     with:
       test_name: pylint
 
   unit:
     needs: [filters, setup, build_deb, build_snap]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
@@ -140,7 +141,7 @@ jobs:
 
   unit_rpm:
     needs: [filters, setup, build_rpm]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distros: ${{ fromJson(needs.setup.outputs.rpm_matrix) }}
@@ -155,7 +156,7 @@ jobs:
 
   stage_one:
     needs: [filters, setup, build_deb, build_snap, unit]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
@@ -171,7 +172,7 @@ jobs:
 
   stage_one_rpm:
     needs: [filters, setup, build_rpm, unit_rpm]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distros: ${{ fromJson(needs.setup.outputs.rpm_matrix) }}
@@ -187,7 +188,7 @@ jobs:
 
   stage_two:
     needs: [filters, setup, build_deb, build_snap, stage_one]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distro: ${{ fromJson(needs.setup.outputs.distros) }}
@@ -202,7 +203,7 @@ jobs:
 
   stage_two_rpm:
     needs: [filters, setup, build_rpm, stage_one_rpm]
-    if: needs.filters.outputs.docs == 'true'
+    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
     strategy:
       matrix:
         distros: ${{ fromJson(needs.setup.outputs.centos_matrix) }}
