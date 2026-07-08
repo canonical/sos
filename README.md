@@ -9,7 +9,7 @@
 
 # SoS
 
-Sos is an extensible, portable, support data collection tool primarily
+sos is an extensible, portable, support data collection tool primarily
 aimed at Linux distributions and other UNIX-like operating systems.
 
 This project is hosted at:

@@ -12,7 +12,7 @@ from sos.utilities import is_executable
 
 class Ubuntu(Plugin, UbuntuPlugin):
 
-    short_desc = 'Ubuntu specific information'
+    short_desc = 'ubuntu specific information'
 
     plugin_name = 'ubuntu'
     profiles = ('system',)
