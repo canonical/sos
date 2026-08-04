@@ -492,7 +492,7 @@ class SoSReport(SoSComponent):
         """
         if self.opts.container_runtime != 'auto':
             crun = self.opts.container_runtime.lower()
-            if crun in ['none', 'off', 'diabled']:
+            if crun in ['none', 'off', 'disabled']:
                 self.policy.runtimes = {}
                 self.soslog.info(
                     "Disabled all container runtimes per user option."

@@ -363,9 +363,17 @@ class SoSCollector(SoSComponent):
             'Collector Options',
             'These options control how collect runs locally'
         )
-        collect_grp.add_argument('-b', '--become', action='store_true',
-                                 dest='become_root',
-                                 help='Become root on the remote nodes')
+        # These privilege escalation options are mutually exclusive
+        priv_grp = collect_grp.add_mutually_exclusive_group()
+        priv_grp.add_argument('-b', '--become', action='store_true',
+                              dest='become_root',
+                              help=('Become root on the remote nodes using '
+                                    'su. Do not use with --nopasswd-sudo'))
+        priv_grp.add_argument('--nopasswd-sudo', action='store_true',
+                              help=('Use passwordless sudo for privilege '
+                                    'escalation on nodes. Implied for '
+                                    'non-root SSH users. Do not use with '
+                                    '--become'))
         collect_grp.add_argument('--case-id', help='Specify case number')
         collect_grp.add_argument('--inherit-config-file', default=False,
                                  action='store_true',
@@ -414,8 +422,6 @@ class SoSCollector(SoSComponent):
                                  dest='primary', default='',
                                  help='Specify a primary node for cluster '
                                       'enumeration')
-        collect_grp.add_argument('--nopasswd-sudo', action='store_true',
-                                 help='Use passwordless sudo on nodes')
         collect_grp.add_argument('--nodes', action="append",
                                  help=('Provide a comma delimited list of '
                                        'nodes, or a regex to match against'))
@@ -603,7 +609,9 @@ class SoSCollector(SoSComponent):
                 try:
                     # there are no instances currently where any cluster option
                     # should contain a legitimate space.
-                    value = option.split('=')[1].split()[0]
+                    # however, some options like ocp.label or kubernetes.label
+                    # do contain equals
+                    value = '='.join(option.split('=')[1:]).split()[0]
                 except IndexError:
                     # conversion to boolean is handled during validation
                     value = 'True'
