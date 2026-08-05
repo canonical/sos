@@ -45,7 +45,7 @@ on:
 jobs:
   test:
     name: ${{ inputs.stage_name }} Tests (${{ inputs.distro_name }}, ${{ matrix.build }})
-    runs-on: ${{ inputs.runs_on != '' && inputs.runs_on || inputs.distro_image == '' && inputs.distro_name || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runs_on != '' && fromJson(inputs.runs_on) || inputs.distro_image == '' && inputs.distro_name || 'ubuntu-latest' }}
     continue-on-error: ${{ inputs.can_fail }}
 
     container:
@@ -63,6 +63,11 @@ jobs:
         build: ${{ fromJson(inputs.builds) }}
 
     steps:
+      - name: Setup tmate session
+        uses: canonical/action-tmate@main
+        with:
+          detached: true
+
       - name: Bootstrap DEB Container based OS
         if: ${{ contains(inputs.distro_name, 'debian') || ( contains(inputs.distro_name, 'ubuntu') && inputs.distro_image != '' ) }}
         run: |
@@ -96,7 +101,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: canonical/sos_testing
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.SOS_TESTING_READ }}
           path: sos_testing
 
       - name: Link items from Tests Repo
@@ -104,13 +109,13 @@ jobs:
         run: |
           # Grab the product tests from the sos_testing repo
           cd sos/tests/product_tests
-          for i in $(ls ~/sos_testing/tests/functional/)
-              ln -s ~/sos_testing/tests/functional/$i
+          for i in $(ls $GITHUB_WORKSPACE/sos_testing/tests/functional/) ; do
+              ln -s $GITHUB_WORKSPACE/sos_testing/tests/functional/$i
           done
           cd ../test_data
           # Extra scripts from the the test_data folder
-          for i in $(ls ~/sos_testing/tests/test_data/)
-              ln -s ~/sos_testing/tests/test_data/$i
+          for i in $(ls $GITHUB_WORKSPACE/sos_testing/tests/test_data/) ; do
+              ln -s $GITHUB_WORKSPACE/sos_testing/tests/test_data/$i
           done
 
       - name: Install functional test dependencies
