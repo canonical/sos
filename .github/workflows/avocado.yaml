@@ -45,7 +45,7 @@ on:
 jobs:
   test:
     name: ${{ inputs.stage_name }} Tests (${{ inputs.distro_name }}, ${{ matrix.build }})
-    runs-on: ${{ inputs.runs_on != '' && inputs.runs_on || inputs.distro_image == '' && inputs.distro_name || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runs_on != '' && fromJson(inputs.runs_on) || inputs.distro_image == '' && inputs.distro_name || 'ubuntu-latest' }}
     continue-on-error: ${{ inputs.can_fail }}
 
     container:
@@ -96,7 +96,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: canonical/sos_testing
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.SOS_TESTING_READ }}
           path: sos_testing
 
       - name: Link items from Tests Repo
