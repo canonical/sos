@@ -22,19 +22,20 @@ jobs:
       deb_matrix: ${{ steps.set-matrix.outputs.deb_matrix }}
       stagetwo_matrix: ${{ steps.set-matrix.outputs.stagetwo_matrix }}
       foreman_matrix: ${{ steps.set-matrix.outputs.foreman_matrix }}
+      sunbeam_matrix: ${{ steps.set-matrix.outputs.sunbeam_matrix }}
     steps:
       - id: set-matrix
         run: |
           DISTRO_JSON='[
-            {"name": "ubuntu-22.04",  "image": "",              "builds": ["deb", "snap"], "stages": "foreman"},
-            {"name": "ubuntu-24.04",  "image": "",              "builds": ["deb", "snap"], "stages": "two"},
-            {"name": "ubuntu-latest", "image": "ubuntu:latest", "builds": ["deb"],         "stages": ""},
-            {"name": "debian-12",     "image": "debian:12",     "builds": ["deb"],         "stages": ""},
-            {"name": "debian-13",     "image": "debian:13",     "builds": ["deb"],         "stages": "two"},
-            {"name": "fedora-43",     "image": "fedora:43",     "builds": ["rpm"],         "stages": ""},
-            {"name": "fedora-44",     "image": "fedora:44",     "builds": ["rpm"],         "stages": ""},
-            {"name": "centos-9",      "image": "quay.io/centos/centos:stream9",  "builds": ["rpm"], "stages": ""},
-            {"name": "centos-10",     "image": "quay.io/centos/centos:stream10", "builds": ["rpm"], "stages": "two"}
+            {"name": "ubuntu-22.04",  "image": "",              "series": "jammy", "builds": ["deb", "snap"], "stages": "foreman"},
+            {"name": "ubuntu-24.04",  "image": "",              "series": "noble", "builds": ["deb", "snap"], "stages": "two,sunbeam"},
+            {"name": "ubuntu-latest", "image": "ubuntu:latest", "series": "",      "builds": ["deb"],         "stages": ""},
+            {"name": "debian-12",     "image": "debian:12",                        "builds": ["deb"],         "stages": ""},
+            {"name": "debian-13",     "image": "debian:13",                        "builds": ["deb"],         "stages": "two"},
+            {"name": "fedora-43",     "image": "fedora:43",                        "builds": ["rpm"],         "stages": ""},
+            {"name": "fedora-44",     "image": "fedora:44",                        "builds": ["rpm"],         "stages": ""},
+            {"name": "centos-9",      "image": "quay.io/centos/centos:stream9",    "builds": ["rpm"],         "stages": ""},
+            {"name": "centos-10",     "image": "quay.io/centos/centos:stream10",   "builds": ["rpm"],         "stages": "two"}
           ]'
           echo "distro_matrix=$(echo $DISTRO_JSON | jq -c .)" >> $GITHUB_OUTPUT
 
@@ -50,10 +51,14 @@ jobs:
           FOREMAN_JSON=$(echo "$DISTRO_JSON" | jq -c '[.[] | select(.stages | contains("foreman"))]')
           echo "foreman_matrix=$FOREMAN_JSON" >> $GITHUB_OUTPUT
 
+          SUNBEAM_JSON=$(echo "$DISTRO_JSON" | jq -c '[.[] | select(.stages | contains("sunbeam"))]')
+          echo "sunbeam_matrix=$SUNBEAM_JSON" >> $GITHUB_OUTPUT
+
   filters:
     runs-on: ubuntu-latest
     outputs:
       foreman: ${{ steps.filter_foreman.outputs.foreman }}
+      sunbeam: ${{ steps.filter_sunbeam.outputs.sunbeam }}
       docs_count: ${{ steps.filter_docs.outputs.doc_files_count }}
       all_count: ${{ steps.filter_docs.outputs.all_files_count }}
     steps:
@@ -88,15 +93,19 @@ jobs:
               - 'AUTHORS'
               - 'LICENSE'
 
-  py_tests:
-    needs: filters
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
-    strategy:
-      matrix:
-        py_version: [ '3.9', '3.x' ]
-    uses: ./.github/workflows/py-tests.yaml
-    with:
-      py_version: ${{ matrix.py_version }}
+      - uses: dorny/paths-filter@v4
+        id: filter_sunbeam
+        with:
+          filters: |
+            sunbeam:
+              - '.github/workflows/**'
+              - '**/__init__.py'
+              - '**/sunbeam.py'
+              - '**/sunbeam_hypervisor.py'
+              - '**/juju.py'
+              - '**/kubernetes.py'
+              - '**/ovn_host.py'
+              - '**/sunbeam_setup.sh'
 
   build_deb:
     needs: [filters, setup]
@@ -109,97 +118,22 @@ jobs:
       distro_image: ${{ matrix.distro.image }}
       distro_name: ${{ matrix.distro.name }}
 
-  build_rpm:
-    needs: [filters, setup]
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
+  sunbeam:
+    needs: [filters, setup, build_deb]
+    if: needs.filters.outputs.sunbeam == 'true'
     strategy:
       matrix:
-        distro: ${{ fromJson(needs.setup.outputs.rpm_matrix) }}
-    uses: ./.github/workflows/build-rpm.yaml
-    with:
-      distro_image: ${{ matrix.distro.image }}
-      distro_name: ${{ matrix.distro.name }}
-
-  build_snap:
-    needs: [filters, setup]
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
-    uses: ./.github/workflows/build-snap.yaml
-
-  flake8:
-    needs: filters
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
-    uses: ./.github/workflows/tox.yaml
-    with:
-      test_name: flake8
-
-  pylint:
-    needs: filters
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
-    uses: ./.github/workflows/tox.yaml
-    with:
-      test_name: pylint
-
-  unit:
-    needs: [filters, setup, build_deb, build_snap, build_rpm]
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
-    strategy:
-      matrix:
-        distro: ${{ fromJson(needs.setup.outputs.distro_matrix) }}
+        distro: ${{ fromJson(needs.setup.outputs.sunbeam_matrix) }}
     uses: ./.github/workflows/avocado.yaml
     with:
-      distro_image: ${{ matrix.distro.image }}
-      distro_name: ${{ matrix.distro.name }}
-      builds: ${{ toJson(matrix.distro.builds) }}"
-      test_name: "unit_tests"
-      stage_name: "Unit"
-
-  stage_one:
-    needs: [filters, setup, build_deb, build_snap, build_rpm, unit]
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
-    strategy:
-      matrix:
-        distro: ${{ fromJson(needs.setup.outputs.distro_matrix) }}
-    uses: ./.github/workflows/avocado.yaml
-    with:
+      runs_on: '["self-hosted", "linux", "amd64", "${{ matrix.distro.series }}", "xlarge"]'
       distro_image: ${{ matrix.distro.image }}
       distro_name: ${{ matrix.distro.name }}
       builds: ${{ toJson(matrix.distro.builds) }}
-      test_name: "stageone_tests"
-      stage_name: "Stage One"
-      can_fail: true
-    secrets: inherit
-
-  stage_two:
-    needs: [filters, setup, build_deb, build_snap, build_rpm, stage_one]
-    if: needs.filters.outputs.all_count > needs.filters.outputs.docs_count
-    strategy:
-      matrix:
-        distro: ${{ fromJson(needs.setup.outputs.stagetwo_matrix) }}
-    uses: ./.github/workflows/avocado.yaml
-    with:
-      distro_image: ${{ matrix.distro.image }}
-      distro_name: ${{ matrix.distro.name }}
-      builds: ${{ toJson(matrix.distro.builds) }}
-      test_name: "stagetwo_tests"
-      stage_name: "Stage Two"
-      can_fail: true
-    secrets: inherit
-
-  foreman:
-    needs: [filters, setup, build_deb, stage_two]
-    if: needs.filters.outputs.foreman == 'true'
-    strategy:
-      matrix:
-        distro: ${{ fromJson(needs.setup.outputs.foreman_matrix) }}
-    uses: ./.github/workflows/avocado.yaml
-    with:
-      distro_image: ${{ matrix.distro.image }}
-      distro_name: ${{ matrix.distro.name }}
-      builds: ${{ toJson(matrix.distro.builds) }}
-      extra_script: ./tests/test_data/foreman_setup.sh
-      test_name: "foreman_tests"
-      stage_name: "Foreman"
-      foreman_ver: "3.15"
-      katello_ver: "4.17"
+      extra_script: ./tests/test_data/sunbeam_setup.sh
+      needs_test_repo: true
+      test_name: "sunbeam_tests"
+      stage_name: "Sunbeam"
+      sunbeam_ver: "2024.1/stable"
       can_fail: true
     secrets: inherit
