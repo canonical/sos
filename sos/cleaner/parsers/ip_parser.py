@@ -34,7 +34,9 @@ class SoSIPParser(SoSCleanerParser):
         'sos_commands/snappy/snap_list_--all',
         'sos_commands/vulkan/vulkaninfo',
         'etc/rhsm/facts/satellite.facts',
-        'var/log/.*dnf.*',
+        # most dnf logs except for dnf.librepo.log that has no false positives
+        r'var/log/dnf\.log.*',
+        r'var/log/dnf\.rpm\.log.*',
         'var/log/.*packag.*',  # get 'packages' and 'packaging' logs
         '.*(version|release)(\\.txt)?$',  # obvious version files
     ]
@@ -42,6 +44,9 @@ class SoSIPParser(SoSCleanerParser):
     map_file_key = 'ip_map'
     compile_regexes = False
 
-    def __init__(self, config, workdir, skip_cleaning_files=[]):
-        self.mapping = SoSIPMap(workdir, self.regex_pattern)
-        super().__init__(config, skip_cleaning_files)
+    def __init__(self, config, workdir, skip_cleaning_files=[],
+                 strict_tokenisation=False, no_update=False):
+        self.mapping = SoSIPMap(
+            workdir, self.regex_pattern, strict_tokenisation,
+            no_update=no_update)
+        super().__init__(config, skip_cleaning_files, strict_tokenisation)

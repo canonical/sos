@@ -55,9 +55,12 @@ class SoSMacParser(SoSCleanerParser):
     map_file_key = 'mac_map'
     compile_regexes = False
 
-    def __init__(self, config, workdir, skip_cleaning_files=[]):
-        self.mapping = SoSMacMap(workdir, self.regex_pattern)
-        super().__init__(config, skip_cleaning_files)
+    def __init__(self, config, workdir, skip_cleaning_files=[],
+                 strict_tokenisation=False, no_update=False):
+        self.mapping = SoSMacMap(
+            workdir, self.regex_pattern, strict_tokenisation,
+            no_update=no_update)
+        super().__init__(config, skip_cleaning_files, strict_tokenisation)
 
     def reduce_mac_match(self, match):
         """Strips away leading and trailing non-alphanum characters from any

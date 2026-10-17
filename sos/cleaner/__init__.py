@@ -129,7 +129,8 @@ class SoSCleaner(SoSComponent):
         'keep_binary_files': False,
         'target': '',
         'usernames': [],
-        'treat_certificates': 'obfuscate'
+        'treat_certificates': 'obfuscate',
+        'strict_tokenisation': False
     }
 
     def __init__(self, parser=None, args=None, cmdline=None, in_place=False,
@@ -173,6 +174,8 @@ class SoSCleaner(SoSComponent):
             self.cleaner_mapping,
             cleaner_dir,
             self.opts.skip_cleaning_files,
+            self.opts.strict_tokenisation,
+            self.opts.no_update,
         ]
 
         parser_classes = [
@@ -358,6 +361,14 @@ third party.
                                    'after convert the file to text. '
                                    '"Key" certificate files are always '
                                    'removed.'))
+        clean_grp.add_argument('--strict-tokenisation', default=False,
+                               action='store_true',
+                               dest='strict_tokenisation',
+                               help=(
+                                   'Enforce more strict tokenisation that '
+                                   'also respects URI encoding, terminal '
+                                   'escape characters, and rsyslog special '
+                                   'characters.'))
 
     def set_target_path(self, path):
         """For use by report and collect to set the TARGET option appropriately
@@ -479,6 +490,10 @@ third party.
         map_path = self.write_map_for_archive(_map)
         self.write_map_for_config(_map)
         self.write_stats_to_manifest()
+
+        if self.opts.no_update:
+            for parser in self.parsers:
+                parser.mapping.cleanup_no_update_cache()
 
         if self.in_place:
             arc_paths = [a.final_archive_path for a in self.completed_reports]
